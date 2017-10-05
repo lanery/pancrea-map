@@ -6,6 +6,7 @@
 @Last Modified time: 05-10-2017 18:24:45
 """
 
+import os
 import numpy as np
 from glob import glob
 import matplotlib.pyplot as plt; plt.rcParams['image.cmap'] = 'magma'
@@ -19,11 +20,11 @@ import odemis_utils
 #-----------------+
 # Load image data |
 #-----------------+
-ome_files = sorted(glob('test*.ome.tiff'))
+ome_files = sorted(glob('test_images/test*.ome.tiff'))
 im_dict = {}
 
 for ome_file in ome_files:
-    k = ome_file.split('.')[0]
+    k = os.path.basename(ome_file).split('.')[0]
     im_dict[k] = stitching_utils.load_tiff(ome_file)
 
 EM_imgs = {}
@@ -35,9 +36,13 @@ for k, d in im_dict.items():
     im_dict[k]['x_pos'] = d['EM'].tags['x_position'].value[0]
     im_dict[k]['y_pos'] = d['EM'].tags['y_position'].value[0]
 
-# compare(EM_imgs, figsize=(14, 4))
-# compare(FM_imgs, figsize=(14, 4))
 
 img1 = odemis_utils.auto_bc(FM_imgs['test3'])
 img2 = odemis_utils.auto_bc(FM_imgs['test4'])
 
+
+model_robust = stitching.estimate_transform(
+    img1, img2, ORB_kws={'downscale': 2})
+
+
+stitching._apply_transform(img1, img2, model_robust)

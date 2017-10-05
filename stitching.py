@@ -13,6 +13,9 @@ from skimage.feature import ORB, match_descriptors, plot_matches
 from skimage.transform import ProjectiveTransform, SimilarityTransform
 from skimage.transform import rescale, warp
 from skimage.measure import ransac
+from skimage.graph import route_through_array
+
+import stitching_utils
 
 
 #-------------------+
@@ -74,30 +77,6 @@ def estimate_transform(img1, img2, return_data=False, ORB_kws=None,
         return model_robust
 
 
-def display_matches(img1, img2, remove_outliers=True,
-                    ransac_kws=None, ORB_kws=None):
-    """
-    """
-    ransac_kws = {} if ransac_kws is None else ransac_kws
-    ORB_kws = {} if ORB_kws is None else ORB_kws
-
-    if remove_outliers:
-        _, kps1, kps2, matches, inliers = estimate_transform(
-            img1, img2, return_data=True, ORB_kws=ORB_kws,
-            **ransac_kws)
-
-        fig, ax = plt.subplots()
-        plot_matches(ax, img1, img2, kps1, kps2,
-                     matches[inliers], '#09BB62', '#00F67A')
-    
-    else:
-        kps1, kps2, matches = _find_matches(img1, img2, ORB_kws=ORB_kws)
-
-        fig, ax = plt.subplots()
-        plot_matches(ax, img1, img2, kps1, kps2,
-                     matches, '#09BB62', '#00F67A')
-
-
 #----------------------------+
 # Apply Estimated Transforms |
 #----------------------------+
@@ -137,4 +116,47 @@ def _apply_transform(img1, img2, model_robust):
     img2_mask = (img2_warped != -1)
     img2_warped[~img2_mask] = 0
 
-    return img1_warped, img2_warped
+
+    ymax = output_shape[1] - 1
+    xmax = output_shape[0] - 1
+
+    # Will have to change based on image location
+    mask_pts = [[0, ymax // 3],
+                [xmax, ymax //3]]
+
+
+    costs = stitching_utils.generate_costs(
+        np.abs(img1_warped - img2_warped), img1_mask & img2_mask)
+
+    costs[0, :] = 0
+    costs[-1, :] = 0
+
+
+    pts, _ = route_through_array(costs, mask_pts[0], mask_pts[1],
+                                 fully_connected=True)
+    pts = np.array(pts)
+
+    # fig, ax = plt.subplots(figsize=(12, 6))
+
+    # # Plot the difference image
+    # ax.imshow(img1_warped - img2_warped)
+
+    # # Overlay the minimum-cost path
+    # ax.plot(pts[:, 1], pts[:, 0])  
+
+    # plt.tight_layout()
+    # ax.axis('off');
+
+
+
+
+
+
+
+
+
+
+
+
+
+

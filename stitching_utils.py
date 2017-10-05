@@ -9,6 +9,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from skimage.external import tifffile
+from skimage.measure import label
 
 
 #-------------------+
@@ -55,3 +56,93 @@ def compare(images, **kwargs):
         axes[n].axis('off')
 
     fig.tight_layout()
+
+
+def display_matches(img1, img2, remove_outliers=True,
+                    ransac_kws=None, ORB_kws=None):
+    """
+    """
+    ransac_kws = {} if ransac_kws is None else ransac_kws
+    ORB_kws = {} if ORB_kws is None else ORB_kws
+
+    if remove_outliers:
+        _, kps1, kps2, matches, inliers = estimate_transform(
+            img1, img2, return_data=True, ORB_kws=ORB_kws,
+            **ransac_kws)
+
+        fig, ax = plt.subplots()
+        plot_matches(ax, img1, img2, kps1, kps2,
+                     matches[inliers], '#09BB62', '#00F67A')
+    
+    else:
+        kps1, kps2, matches = _find_matches(img1, img2, ORB_kws=ORB_kws)
+
+        fig, ax = plt.subplots()
+        plot_matches(ax, img1, img2, kps1, kps2,
+                     matches, '#09BB62', '#00F67A')
+
+
+def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
+    """
+    Ensures equal-cost paths from edges to region of interest.
+    
+    Parameters
+    ----------
+    diff_image : (M, N) ndarray of floats
+        Difference of two overlapping images.
+    mask : (M, N) ndarray of bools
+        Mask representing the region of interest in ``diff_image``.
+    vertical : bool
+        Control operation orientation.
+    gradient_cutoff : float
+        Controls how far out of parallel lines can be to edges before
+        correction is terminated. The default (2.) is good for most cases.
+        
+    Returns
+    -------
+    costs_arr : (M, N) ndarray of floats
+        Adjusted costs array, ready for use.
+    """
+    if vertical is not True:
+        return tweak_costs(diff_image.T, mask.T, vertical=vertical,
+                           gradient_cutoff=gradient_cutoff).T
+    
+    # Start with a high-cost array of 1's
+    costs_arr = np.ones_like(diff_image)
+    
+    # Obtain extent of overlap
+    row, col = mask.nonzero()
+    cmin = col.min()
+    cmax = col.max()
+
+    # Label discrete regions
+    cslice = slice(cmin, cmax + 1)
+    labels = label(mask[:, cslice])
+    
+    # Find distance from edge to region
+    upper = (labels == 0).sum(axis=0)
+    lower = (labels == 2).sum(axis=0)
+    
+    # Reject areas of high change
+    ugood = np.abs(np.gradient(upper)) < gradient_cutoff
+    lgood = np.abs(np.gradient(lower)) < gradient_cutoff
+    
+    # Give areas slightly farther from edge a cost break
+    costs_upper = np.ones_like(upper, dtype=np.float64)
+    costs_lower = np.ones_like(lower, dtype=np.float64)
+    costs_upper[ugood] = upper.min() / np.maximum(upper[ugood], 1)
+    costs_lower[lgood] = lower.min() / np.maximum(lower[lgood], 1)
+    
+    # Expand from 1d back to 2d
+    vdist = mask.shape[0]
+    costs_upper = costs_upper[np.newaxis, :].repeat(vdist, axis=0)
+    costs_lower = costs_lower[np.newaxis, :].repeat(vdist, axis=0)
+    
+    # Place these in output array
+    costs_arr[:, cslice] = costs_upper * (labels == 0)
+    costs_arr[:, cslice] +=  costs_lower * (labels == 2)
+    
+    # Finally, place the difference image
+    costs_arr[mask] = diff_image[mask]
+    
+    return costs_arr
