@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   27-09-2017 09:39:33
 @Last Modified by:   rlane
-@Last Modified time: 05-10-2017 18:24:45
+@Last Modified time: 06-10-2017 16:48:43
 """
 
 import os
@@ -38,11 +38,11 @@ for k, d in im_dict.items():
 
 
 img1 = odemis_utils.auto_bc(FM_imgs['test3'])
-img2 = odemis_utils.auto_bc(FM_imgs['test4'])
+img2 = odemis_utils.auto_bc(FM_imgs['test5'])
 
 
-model_robust = stitching.estimate_transform(
+model_robust = stitching._estimate_transform(
     img1, img2, ORB_kws={'downscale': 2})
 
 
-stitching._apply_transform(img1, img2, model_robust)
+stitching._minimum_cost_path(img1, img2, model_robust)
