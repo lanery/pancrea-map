@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   27-09-2017 09:39:33
 @Last Modified by:   rlane
-@Last Modified time: 06-10-2017 16:48:43
+@Last Modified time: 10-10-2017 11:46:30
 """
 
 import os
@@ -37,12 +37,27 @@ for k, d in im_dict.items():
     im_dict[k]['y_pos'] = d['EM'].tags['y_position'].value[0]
 
 
-img1 = odemis_utils.auto_bc(FM_imgs['test3'])
-img2 = odemis_utils.auto_bc(FM_imgs['test5'])
+# img1 = odemis_utils.auto_bc(FM_imgs['test2'])
+# img2 = odemis_utils.auto_bc(FM_imgs['test4'])
 
+# model_robust = stitching._estimate_transform(
+#     img1, img2, ORB_kws={'downscale': 2})
 
-model_robust = stitching._estimate_transform(
-    img1, img2, ORB_kws={'downscale': 2})
+# stitched = stitching._stitch(img1, img2, model_robust)
 
+base_img = odemis_utils.auto_bc(FM_imgs['test2'])
 
-stitching._minimum_cost_path(img1, img2, model_robust)
+for label, img in FM_imgs.items():
+    if label != 'test2':
+        print(label)
+
+        stitched = base_img
+
+        img_bc = odemis_utils.auto_bc(img)
+        model_robust = stitching._estimate_transform(
+            stitched, img_bc, ORB_kws={'downscale': 2})
+
+        stitched = stitching._stitch(stitched, img_bc, model_robust)
+
+        plt.figure()
+        plt.imshow(stitched)

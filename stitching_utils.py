@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   28-09-2017 12:24:34
 @Last Modified by:   rlane
-@Last Modified time: 06-10-2017 16:32:29
+@Last Modified time: 10-10-2017 14:55:54
 """
 
 import numpy as np
@@ -17,17 +17,17 @@ import stitching
 #-------------------+
 # Utility Functions |
 #-------------------+
-def load_tiff(tiff_file):
+def load_tiff(ome_tiff_file):
     """
     Utility function to load multi-page tiff files
 
     Parameters
     ----------
-    tiff_file : file
+    ome_tiff_file : file
         Multi-page ome tiff file rendered by Odemis
     """
     ome_dict = {}
-    with tifffile.TiffFile(tiff_file) as tif:
+    with tifffile.TiffFile(ome_tiff_file) as tif:
         for p, page in enumerate(tif):
             if page.tags['page_name'].value == b'Filtered colour 1':
                 ome_dict['FM'] = page
@@ -36,6 +36,34 @@ def load_tiff(tiff_file):
             else:
                 ome_dict['?M'] = page
     return ome_dict
+
+
+def get_xy_position(ome_tiff_file, instrument='SEM'):
+    """
+    """
+    with tifffile.TiffFile(ome_tiff_file) as tif:
+        for p, page in enumerate(tif):
+            if page.tags['page_name'].value == b'Filtered colour 1':
+                x_pos_FM = page.tags['x_position'].value[0]
+                y_pos_FM = page.tags['y_position'].value[0]
+            elif page.tags['page_name'].value == b'Secondary electrons':
+                x_pos_EM = page.tags['x_position'].value[0]
+                y_pos_EM = page.tags['y_position'].value[0]
+            else:
+                pass
+
+    if instrument == 'SEM':
+        x_pos = x_pos_EM
+        y_pos = y_pos_EM
+    elif instrument == 'FM':
+        x_pos = x_pos_FM
+        y_pos = y_pos_FM
+    else:
+        msg = "Instrument must be either {} or {}. Not {}".format(
+            valid_instruments, instrument)
+        raise ValueError(msg)
+
+    return x_pos, y_pos
 
 
 def compare(images, **kwargs):

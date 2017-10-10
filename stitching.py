@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   28-09-2017 12:22:52
 @Last Modified by:   rlane
-@Last Modified time: 06-10-2017 17:12:11
+@Last Modified time: 10-10-2017 11:11:51
 """
 
 import numpy as np
@@ -14,6 +14,7 @@ from skimage.transform import ProjectiveTransform, SimilarityTransform
 from skimage.transform import rescale, warp
 from skimage.measure import ransac, label
 from skimage.graph import route_through_array
+from skimage.color import gray2rgb
 
 import stitching_utils
 
@@ -61,8 +62,8 @@ def _estimate_transform(anchor, joiner, return_data=False, ORB_kws=None,
     ORB_kws = {} if ORB_kws is None else ORB_kws
     kps_anchor, kps_joiner, matches = _find_matches(anchor, joiner, **ORB_kws)
 
-    src = kps_anchor[matches[:, 0]][:, ::-1]
-    dst = kps_joiner[matches[:, 1]][:, ::-1]
+    src = kps_joiner[matches[:, 1]][:, ::-1]
+    dst = kps_anchor[matches[:, 0]][:, ::-1]
 
     default_ransac_kws = dict(min_samples=4, residual_threshold=1,
                               max_trials=300)
@@ -119,14 +120,6 @@ def _apply_transform(anchor, joiner, model_robust):
                 [xmax, ymax // 2]]
 
     return anchor_warped, joiner_warped, anchor_mask, joiner_mask, mask_pts
-
-
-    # stitching_utils.compare([anchor_warped, joiner_warped])
-    # stitching_utils.compare([anchor_mask, joiner_mask])
-
-#
-# Something will have to go here
-#
 
 
 #----------------+
@@ -201,7 +194,7 @@ def _generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
 #----------------------------+
 # Find the Minimum Cost Path |
 #----------------------------+
-def _minimum_cost_path(anchor, joiner, model_robust):
+def _stitch(anchor, joiner, model_robust):
     """
     """
     anchor_warped, joiner_warped, anchor_mask, joiner_mask, mask_pts = (
@@ -216,118 +209,12 @@ def _minimum_cost_path(anchor, joiner, model_robust):
                                  fully_connected=True)
     pts = np.array(pts)
 
+    anchor_mask = np.zeros_like(anchor_warped, dtype=np.uint8)
+    anchor_mask[pts[:, 0], pts[:, 1]] = 1
+    anchor_mask = (label(anchor_mask, connectivity=1, background=-1) == 1)
 
-    plt.imshow(joiner_warped - anchor_warped)
-    plt.plot(pts[:, 1], pts[:, 0])
-    plt.tight_layout()
-    plt.axis('off')
+    joiner_mask = ~(anchor_mask).astype(bool)
 
+    stitched = np.where(anchor_mask, anchor_warped, joiner_warped)
 
-
-
-
-
-
-
-#
-# Something goes here
-#
-
-
-
-#-------------------------------+
-# Place Masks in alpha channels |
-#-------------------------------+
-def _add_alpha(img, mask=None):
-    """
-    Adds a masked alpha channel to an image.
-    
-    Parameters
-    ----------
-    img : (M, N[, 3]) ndarray
-        Image data, should be rank-2 or rank-3 with RGB channels
-    mask : (M, N[, 3]) ndarray, optional
-        Mask to be applied. If None, the alpha channel is added
-        with full opacity assumed (1) at all locations.
-    """
-    from skimage.color import gray2rgb
-    if mask is None:
-        mask = np.ones_like(img)
-        
-    if img.ndim == 2:
-        img = gray2rgb(img)
-    
-    return np.dstack((img, mask))
-
-
-# Complete 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # anchor_warped = warp(anchor, offset.inverse, order=3,
-    #                    output_shape=output_shape, cval=-1)
-
-    # anchor_mask = (anchor_warped != -1)
-    # anchor_warped[~anchor_mask] = 0
-
-
-    # transform = (model_robust + offset).inverse
-
-    # joiner_warped = warp(joiner, transform, order=3,
-    #                    output_shape=output_shape, cval=-1)
-
-    # joiner_mask = (joiner_warped != -1)
-    # joiner_warped[~joiner_mask] = 0
-
-
-    # ymax = output_shape[1] - 1
-    # xmax = output_shape[0] - 1
-
-    # # Will have to change based on image location
-    # mask_pts = [[0, ymax // 3],
-    #             [xmax, ymax //3]]
-
-
-    # costs = stitching_utils.generate_costs(
-    #     np.abs(anchor_warped - joiner_warped), anchor_mask & joiner_mask)
-
-    # costs[0, :] = 0
-    # costs[-1, :] = 0
-
-
-    # pts, _ = route_through_array(costs, mask_pts[0], mask_pts[1],
-    #                              fully_connected=True)
-    # pts = np.array(pts)
-
-    # fig, ax = plt.subplots(figsize=(12, 6))
-
-    # # Plot the difference image
-    # ax.imshow(anchor_warped - joiner_warped)
-
-    # # Overlay the minimum-cost path
-    # ax.plot(pts[:, 1], pts[:, 0])  
-
-    # plt.tight_layout()
-    # ax.axis('off');
+    return stitched
