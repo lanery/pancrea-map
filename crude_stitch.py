@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 12-10-2017 16:46:49
+@Last Modified time: 12-10-2017 17:15:53
 """
 
 import os
@@ -189,6 +189,9 @@ def get_translations(data):
 
     shifts = []
     for k1, k2 in zip(keys_sorted, keys_sorted[1:]):
+
+        # for g1, g2 in zip(k)
+
         shift, error, phase_difference = register_translation(
             FM_imgs[k1], FM_imgs[k2])
         shifts.append(shift[::-1])
