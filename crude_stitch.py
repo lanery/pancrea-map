@@ -78,8 +78,12 @@ def calibrate_stage_movement(delta_x, delta_y=None):
 def load_data(dir_name):
     """
     """
-    ome_files = sorted(glob(dir_name + '\\*ome.tiff'))
-    h5_files = sorted(glob(dir_name + '\\*.h5'))
+    ome_files = sorted(glob(dir_name + '/*ome.tiff'))
+    h5_files = sorted(glob(dir_name + '/*.h5'))
+
+    if not (ome_files or h5_files):
+        msg = "No image data in '{}'".format(dir_name)
+        raise FileNotFoundError(msg)
 
     img_dict = {}
     FM_imgs = {}
@@ -118,6 +122,9 @@ def load_data(dir_name):
         for k, h5 in img_dict.items():
             try:
                 FM_imgs[k] = h5['Acquisition0']['ImageData']['Image'].value
+                FM_imgs[k] = odemis_utils.auto_bc(FM_imgs[k])
+                if len(FM_imgs[k].shape) > 3:
+                    FM_imgs[k] = FM_imgs[k][0,0,0,:,:]
             except KeyError:
                 pass
 
@@ -175,35 +182,41 @@ def get_translations_from_stage_positions(data):
     return translations
 
 
-def get_translations(data):
+def sort_keys(x_positions, y_positions, shape):
+    """
+    """
+    import pandas as pd
+
+    df = pd.DataFrame([x_positions, y_positions]).T
+    df = df.sort_values([0, 1], ascending=[True, False])
+    keys = df.index.values.reshape(shape).tolist()
+    return keys
+
+
+def get_translations(data, shape=(4, 4)):
     """
     TODO: Have some scheme for organizing / sorting images
     """
     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
-    keys = list(img_dict.keys())
-
-    xs = np.array(list(x_positions.values()))
-    ys = np.array(list(y_positions.values()))
-
-    keys_sorted = np.array(keys)[xs.argsort()]
+    keys = sort_keys(x_positions, y_positions, shape)
 
     shifts = []
-    for k1, k2 in zip(keys_sorted, keys_sorted[1:]):
+    for row in keys:
+        for k1, k2 in zip(row, row[1:]):
 
-        # for g1, g2 in zip(k)
-
-        shift, error, phase_difference = register_translation(
-            FM_imgs[k1], FM_imgs[k2])
-        shifts.append(shift[::-1])
+            shift, error, phase_difference = register_translation(
+                FM_imgs[k1], FM_imgs[k2])
+            shifts.append(shift[::-1])
+    return shifts
 
     # Accumulate translations
     cum_shifts = np.cumsum(shifts, axis=0)
 
     # Add (0, 0) translation for first image
-    translations = {keys_sorted[0]: SimilarityTransform(
+    translations = {keys[0]: SimilarityTransform(
         translation=np.array([0, 0]))}
 
-    for i, k in enumerate(keys_sorted[1:]):
+    for i, k in enumerate(keys[1:]):
         translations[k] = SimilarityTransform(
             translation=cum_shifts[i])    
 
@@ -253,8 +266,8 @@ def tile_images(dir_name):
 
 
 if __name__ == '__main__':
-    # dir_name = 'rat-pancreas'
-    dir_name = 'test_images2'
+    dir_name = 'rat-pancreas2'
+    # dir_name = 'test_images'
 
     # data = load_data('test_images2')
     # img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
