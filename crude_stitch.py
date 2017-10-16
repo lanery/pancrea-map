@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 12-10-2017 17:15:53
+@Last Modified time: 16-10-2017 11:28:37
 """
 
 import os
@@ -75,13 +75,22 @@ def calibrate_stage_movement(delta_x, delta_y=None):
     return movement_in_microns
 
 
-def load_data(dir_name):
+def load_data(dir_name=None, filenames=None):
     """
     """
-    ome_files = sorted(glob(dir_name + '/*ome.tiff'))
-    h5_files = sorted(glob(dir_name + '/*.h5'))
+    if dir_name is not None:
+        tiff_files = sorted(glob(dir_name + '/*ome.tiff'))
+        h5_files = sorted(glob(dir_name + '/*.h5'))
 
-    if not (ome_files or h5_files):
+    elif filenames is not None:
+        tiff_files = [tf for tf in filenames if 'ome.tiff' in tf]
+        h5_files = [h5 for h5 in filenames if 'h5' in h5]
+
+    else:
+        msg = "No data origin provided."
+        raise ValueError(msg)
+
+    if not (tiff_files or h5_files):
         msg = "No image data in '{}'".format(dir_name)
         raise FileNotFoundError(msg)
 
@@ -91,11 +100,11 @@ def load_data(dir_name):
     x_positions = {}
     y_positions = {}
 
-    if len(ome_files) > 0:
+    if len(tiff_files) > 0:
 
-        for ome_file in ome_files:
-            k = os.path.basename(ome_file).split('.')[0]
-            img_dict[k] = tifffile.TiffFile(ome_file)
+        for tiff_file in tiff_files:
+            k = os.path.basename(tiff_file).split('.')[0]
+            img_dict[k] = tifffile.TiffFile(tiff_file)
 
         for k, tiff in img_dict.items():
             try:
@@ -193,7 +202,7 @@ def sort_keys(x_positions, y_positions, shape):
     return keys
 
 
-def get_translations(data, shape=(4, 4)):
+def get_translations(data, shape):
     """
     TODO: Have some scheme for organizing / sorting images
     """
@@ -218,22 +227,22 @@ def get_translations(data, shape=(4, 4)):
 
     for i, k in enumerate(keys[1:]):
         translations[k] = SimilarityTransform(
-            translation=cum_shifts[i])    
+            translation=cum_shifts[i])
 
     return translations
 
 
-def tile_images(dir_name):
+def tile_images(dir_name, filenames, shape):
     """
     Notes
     -----
     Will have to separate FM and EM images
     """
-    data = load_data(dir_name)
+    data = load_data(dir_name=dir_name, filenames=filenames)
     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
     keys = list(img_dict.keys())
 
-    translations = get_translations(data)
+    translations = get_translations(data, shape=shape)
 
     shifts = np.array([tr.translation for tr in translations.values()])
 
@@ -264,15 +273,16 @@ def tile_images(dir_name):
     return stitched_norm
 
 
-
 if __name__ == '__main__':
     dir_name = 'rat-pancreas2'
     # dir_name = 'test_images'
+    filenames = ['rat-pancreas2//tile_4-2.h5',
+                 'rat-pancreas2//tile_4-3.h5']
 
-    # data = load_data('test_images2')
-    # img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
+    data = load_data(filenames=filenames)
+    img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
 
-    stitched = tile_images(dir_name)
+    # stitched = tile_images(dir_name)
 
-    fig, ax = plt.subplots()
-    ax.imshow(stitched)
+    # fig, ax = plt.subplots()
+    # ax.imshow(stitched)
