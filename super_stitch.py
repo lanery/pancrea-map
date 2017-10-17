@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 17-10-2017 13:57:04
+@Last Modified time: 17-10-2017 18:45:59
 """
 
 import os
@@ -13,66 +13,13 @@ from skimage.external import tifffile
 import matplotlib.pyplot as plt
 import h5py
 
+from skimage.feature import ORB, match_descriptors
 from skimage.feature import register_translation
-from skimage.transform import SimilarityTransform, warp
+from skimage.transform import SimilarityTransform, AffineTransform
 from skimage.graph import route_through_array
-from skimage.measure import label
+from skimage.measure import label, ransac
 
 import odemis_utils
-
-
-def calc_HFW(M, pixel_size=6.5, N_pixels=2560):
-    """
-    Calculate Horizontal Field Width of an image
-
-    Parameters
-    ----------
-    M : scalar
-        Magnification of the objective lens
-    pixel_size : scalar
-        Pixel size (assuming square pixels) of pixel from sCMOS chip
-    N_pixels : scalar
-        Number of pixels in the horizontal dimension
-
-    Returns
-    -------
-    HFW : scalar
-        The calculated Horizontal Field Width
-
-    Notes
-    -----
-    Based on known specifications of the Andor Zyla 5.5 sCMOS camera (pixel
-    size and number of pixels) and magnification of Nikon objective lens.
-    http://www.andor.com/scientific-cameras/neo-and-zyla-scmos-cameras/zyla-55-scmos#specifications
-    """
-    HFW = (pixel_size * N_pixels) / M
-    return HFW
-
-
-def calc_N_pixels(dist, M, pixel_size=6.5):
-    """
-    """
-    N_pixels = dist * M / pixel_size
-    return N_pixels
-
-
-def calibrate_stage_movement(delta_x, delta_y=None):
-    """
-    Notes
-    -----
-    Would be way better if the exact stage calibration were known or if
-    there was a superior method for calculating stage position/movement
-    from images
-    """
-    if delta_y is None:
-        movement_in_microns = delta_x * (1 / 1677.904)
-
-    else:
-        movement_in_microns_x = delta_x * (1 / 1677.904)
-        movement_in_microns_y = delta_y * (1 / 1677.904)
-        movement_in_microns = (movement_in_microns_x, movement_in_microns_y)
-
-    return movement_in_microns
 
 
 def load_data(dir_name=None, filenames=None):
@@ -117,10 +64,8 @@ def load_data(dir_name=None, filenames=None):
             except IndexError:
                 pass
 
-            x_positions[k] = calibrate_stage_movement(
-                tiff.pages[1].tags['x_position'].value[0]) - 1e6
-            y_positions[k] = calibrate_stage_movement(
-                tiff.pages[1].tags['y_position'].value[0]) - 1e6
+            x_positions[k] = tiff.pages[1].tags['x_position'].value[0]
+            y_positions[k] = tiff.pages[1].tags['y_position'].value[0]
 
     if len(h5_files) > 0:
 
@@ -149,46 +94,6 @@ def load_data(dir_name=None, filenames=None):
 
     data = img_dict, FM_imgs, EM_imgs, x_positions, y_positions
     return data
-
-
-def get_translations_from_stage_positions(data):
-    """
-
-    # Code that I didn't want to lose forever
-    # img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
-
-    # xs = np.array(list(x_positions.values()))
-    # ys = np.array(list(y_positions.values()))
-
-    # H_px, W_px = list(FM_imgs.values())[0].shape
-    # x_pixel_range = int(calc_N_pixels(np.max(xs) - np.min(xs), M=M) + W_px)
-    # y_pixel_range = int(calc_N_pixels(np.max(ys) - np.min(ys), M=M) + H_px)
-
-    # output_shape = np.array([y_pixel_range, x_pixel_range])
-
-    """
-    img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
-    keys = list(img_dict.keys())
-
-    xs = np.array(list(x_positions.values()))
-    ys = np.array(list(y_positions.values()))
-
-    # Vectorize stage movements
-    raw_translations = np.vstack((np.diff(xs), np.diff(ys))).T
-    # Add (0, 0) initial stage movement
-    raw_translations = np.insert(raw_translations, 0, 0, axis=0)
-    # Convert from physical distance to pixel distance
-    raw_translations = calc_N_pixels(raw_translations, M=M)
-    # Accumulate translations
-    cum_translations = np.cumsum(raw_translations, axis=0)
-
-    translations = {}
-
-    for i, k in enumerate(keys):
-        translations[k] = SimilarityTransform(
-            translation=cum_translations[i])
-
-    return translations
 
 
 def get_shape(data):
@@ -238,6 +143,75 @@ def get_translations(data):
     # Accumulate translations
     cum_shifts = np.cumsum(shifts, axis=1)
     cum_shifts[1,:,1] += 1500
+
+    translations = {}
+    for row_keys, row_shifts in zip(keys, cum_shifts):
+        for k, shift in zip(row_keys, row_shifts):
+            translations[k] = SimilarityTransform(translation=shift)
+
+    return translations
+
+
+def detect_features(img, **ORB_kws):
+    """
+    """
+    default_ORB_kws = dict(downscale=1.2, n_scales=8, n_keypoints=800,
+                           fast_n=9, fast_threshold=0.05, harris_k=0.04)
+    ORB_kws = {**default_ORB_kws, **ORB_kws}
+
+    orb = ORB(**ORB_kws)
+
+    orb.detect_and_extract(img.astype(float))
+    kps = orb.keypoints
+    dps = orb.descriptors
+
+    return kps, dps
+
+
+def find_matches(img1, img2, **ORB_kws):
+    """
+    """
+    kps_img1, dps_img1 = detect_features(img1, **ORB_kws)
+    kps_img2, dps_img2 = detect_features(img2, **ORB_kws)
+
+    matches = match_descriptors(dps_img1, dps_img2, cross_check=True)
+    return kps_img1, kps_img2, matches
+
+
+def get_translations_robust(data):
+    """
+    Make this work
+    Have to run translation finding on 4-3, 5-3, ... etc (verticals)
+    """
+    img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
+    shape = get_shape(data)
+    keys = sort_keys(x_positions, y_positions, shape)
+
+    shifts = []
+    for row in keys:
+        shifts.append(np.zeros(2))
+        for k1, k2 in zip(row, row[1:]):
+
+            kps_img1, kps_img2, matches = find_matches(
+                FM_imgs[k1], FM_imgs[k2])
+
+            src = kps_img2[matches[:, 1]][:, ::-1]
+            dst = kps_img1[matches[:, 0]][:, ::-1]
+
+            print(k1, k2)
+
+            model_robust, inliers = ransac(
+                (src, dst), AffineTransform, min_samples=4,
+                max_trials=300, residual_threshold=1)
+
+            shift = model_robust.translation
+            shifts.append(shift)
+
+    shifts = np.array(shifts).reshape(shape + (2,))
+
+    # Accumulate translations
+    cum_shifts = np.cumsum(shifts, axis=1)
+    # cum_shifts[1,:,1] += 1500
 
     translations = {}
     for row_keys, row_shifts in zip(keys, cum_shifts):

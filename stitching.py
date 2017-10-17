@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   28-09-2017 12:22:52
 @Last Modified by:   rlane
-@Last Modified time: 12-10-2017 09:59:42
+@Last Modified time: 17-10-2017 17:40:29
 """
 
 import numpy as np
@@ -73,7 +73,6 @@ def _estimate_transform(anchor, joiner, return_data=False, ORB_kws=None,
                                    **ransac_kws)
     if return_data:
         return model_robust, kps_anchor, kps_joiner, matches, inliers
-
     else:
         return model_robust
 

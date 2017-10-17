@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   28-09-2017 12:24:34
 @Last Modified by:   rlane
-@Last Modified time: 10-10-2017 14:55:54
+@Last Modified time: 17-10-2017 14:04:56
 """
 
 import numpy as np
@@ -95,18 +95,15 @@ def display_matches(img1, img2, remove_outliers=True,
     ransac_kws = {} if ransac_kws is None else ransac_kws
     ORB_kws = {} if ORB_kws is None else ORB_kws
 
-    if remove_outliers:
-        _, kps1, kps2, matches, inliers = stitching._estimate_transform(
-            img1, img2, return_data=True, ORB_kws=ORB_kws,
-            **ransac_kws)
+    _, kps1, kps2, matches, inliers = stitching._estimate_transform(
+        img1, img2, return_data=True, ORB_kws=ORB_kws,
+        **ransac_kws)
 
-        fig, ax = plt.subplots()
+    fig, ax = plt.subplots()
+
+    if remove_outliers:
         plot_matches(ax, img1, img2, kps1, kps2,
                      matches[inliers], '#09BB62', '#00F67A')
-    
     else:
-        kps1, kps2, matches = _find_matches(img1, img2, ORB_kws=ORB_kws)
-
-        fig, ax = plt.subplots()
         plot_matches(ax, img1, img2, kps1, kps2,
                      matches, '#09BB62', '#00F67A')
