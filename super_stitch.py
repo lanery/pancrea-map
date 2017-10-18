@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 18-10-2017 14:41:46
+@Last Modified time: 18-10-2017 15:21:35
 """
 
 import os
@@ -122,7 +122,7 @@ def sort_keys(x_positions, y_positions, shape):
     return keys
 
 
-def get_translations(data):
+def get_translations_fast(data):
     """
     """
     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
@@ -142,7 +142,6 @@ def get_translations(data):
 
     # Accumulate translations
     cum_shifts = np.cumsum(shifts, axis=1)
-    # cum_shifts[1,:,1] += 1500
 
     translations = {}
     for row_keys, row_shifts in zip(keys, cum_shifts):
@@ -234,18 +233,15 @@ def get_translations_robust(data):
     cum_h_shifts = np.cumsum(h_shifts, axis=1)
     cum_v_shifts = np.cumsum(v_shifts, axis=1)
 
-    tot_shifts = (cum_h_shifts.reshape(shape[-1]*2, 2) +
-                  cum_v_shifts.reshape(shape[-1]*2, 2)).reshape(shape + (2,))
+    translations = (cum_h_shifts.reshape(shape[-1]*2, 2) +
+                    cum_v_shifts.reshape(shape[-1]*2, 2))
 
-    translations = {}
-    for row_keys, row_shifts in zip(keys, tot_shifts):
-        for k, shift in zip(row_keys, row_shifts):
-            translations[k] = SimilarityTransform(translation=shift)
+    translations = translations - translations[:, 1].min()
 
-    return translations
+    return translations.astype(np.int64)
 
 
-def tile_images(data):
+def tile_images(data, translations):
     """
     Notes
     -----
@@ -254,25 +250,26 @@ def tile_images(data):
     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
     keys = list(img_dict.keys())
 
-    translations = get_translations_robust(data)
+    # translations = get_translations_robust(data)
+    shifts = np.array([tr for tr in translations.values()])
 
     # import pickle
     # with open('translations.pickle', 'rb') as handle:
     #     translations = pickle.load(handle)
 
-    shifts = np.array([tr.translation for tr in translations.values()],
-                      dtype=np.int64)
-
     H_px, W_px = data[1][list(data[1].keys())[0]].shape
-    output_shape = np.array([(shifts[:, 1].max() - shifts[:, 1].min()) + H_px,
-                             (shifts[:, 0].max() - shifts[:, 0].min()) + W_px])
+    # TODO: output_shape currently cuts off -y dimension
+    output_shape = np.array(
+        [(shifts[:, 1].max() - shifts[:, 1].min()) + H_px,
+         (shifts[:, 0].max() - shifts[:, 0].min()) + W_px])
 
     warpeds = {}
     masks = {}
 
     for i, k in enumerate(keys):
 
-        warped = warp(FM_imgs[k], translations[k].inverse, order=3,
+        translation = AffineTransform(translation=translations[k]).inverse
+        warped = warp(FM_imgs[k], translation, order=3,
                       output_shape=output_shape, cval=-1)
 
         mask = (warped != -1)
