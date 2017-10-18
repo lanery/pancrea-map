@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 18-10-2017 15:21:35
+@Last Modified time: 18-10-2017 18:50:10
 """
 
 import os
@@ -19,81 +19,8 @@ from skimage.transform import SimilarityTransform, AffineTransform, warp
 from skimage.graph import route_through_array
 from skimage.measure import label, ransac
 
+import odemis_data
 import odemis_utils
-
-
-def load_data(dir_name=None, filenames=None):
-    """
-    """
-    if dir_name is not None:
-        tiff_files = sorted(glob(dir_name + '/*ome.tiff'))
-        h5_files = sorted(glob(dir_name + '/*.h5'))
-
-    elif filenames is not None:
-        tiff_files = [tf for tf in filenames if 'ome.tiff' in tf]
-        h5_files = [h5 for h5 in filenames if 'h5' in h5]
-
-    else:
-        msg = "No data origin provided."
-        raise ValueError(msg)
-
-    if not (tiff_files or h5_files):
-        msg = "No image data in '{}'".format(dir_name)
-        raise FileNotFoundError(msg)
-
-    img_dict = {}
-    FM_imgs = {}
-    EM_imgs = {}
-    x_positions = {}
-    y_positions = {}
-
-    if len(tiff_files) > 0:
-
-        for tiff_file in tiff_files:
-            k = os.path.basename(tiff_file).split('.')[0]
-            img_dict[k] = tifffile.TiffFile(tiff_file)
-
-        for k, tiff in img_dict.items():
-            try:
-                FM_imgs[k] = odemis_utils.auto_bc(tiff.pages[1].asarray())
-            except IndexError:
-                pass
-
-            try:
-                EM_imgs[k] = tiff.pages[2].asarray()
-            except IndexError:
-                pass
-
-            x_positions[k] = tiff.pages[1].tags['x_position'].value[0]
-            y_positions[k] = tiff.pages[1].tags['y_position'].value[0]
-
-    if len(h5_files) > 0:
-
-        for h5_file in h5_files:
-            k = os.path.basename(h5_file).split('.')[0]
-            img_dict[k] = h5py.File(h5_file)
-
-        for k, h5 in img_dict.items():
-            try:
-                FM_imgs[k] = h5['Acquisition0']['ImageData']['Image'].value
-                FM_imgs[k] = odemis_utils.auto_bc(FM_imgs[k])
-                if len(FM_imgs[k].shape) > 3:
-                    FM_imgs[k] = FM_imgs[k][0,0,0,:,:]
-            except KeyError:
-                pass
-
-            try:
-                EM_imgs[k] = h5['SEMimage']['ImageData']['Image'].value
-            except KeyError:
-                pass
-
-            x_positions[k] = (
-                h5['Acquisition0']['ImageData']['XOffset'].value * 1e6)
-            y_positions[k] = (
-                h5['Acquisition0']['ImageData']['YOffset'].value * 1e6)
-
-    data = img_dict, FM_imgs, EM_imgs, x_positions, y_positions
-    return data
 
 
 def get_shape(data):
@@ -111,44 +38,48 @@ def get_shape(data):
     return shape
 
 
-def sort_keys(x_positions, y_positions, shape):
+def get_keys(data):
     """
     """
     import pandas as pd
 
+    img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
+    shape = get_shape(data)
+
     df = pd.DataFrame([x_positions, y_positions]).T
     df = df.sort_values([1, 0], ascending=[False, True])
-    keys = df.index.values.reshape(shape).tolist()
+    keys = df.index.values.reshape(shape)
+
     return keys
 
 
-def get_translations_fast(data):
-    """
-    """
-    img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
-    shape = get_shape(data)
-    keys = sort_keys(x_positions, y_positions, shape)
+# def get_translations_fast(data):
+#     """
+#     """
+#     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
+#     shape = get_shape(data)
+#     keys = get_keys(data)
 
-    shifts = []
-    for row in keys:
-        shifts.append(np.zeros(2))
-        for k1, k2 in zip(row, row[1:]):
-            shift, error, phase_difference = register_translation(
-                FM_imgs[k1], FM_imgs[k2])
-            shifts.append(shift[::-1])
+#     shifts = []
+#     for row in keys:
+#         shifts.append(np.zeros(2))
+#         for k1, k2 in zip(row, row[1:]):
+#             shift, error, phase_difference = register_translation(
+#                 FM_imgs[k1], FM_imgs[k2])
+#             shifts.append(shift[::-1])
 
-    # Convert shifts to numpy array
-    shifts = np.array(shifts).reshape(shape + (2,))
+#     # Convert shifts to numpy array
+#     shifts = np.array(shifts).reshape(shape + (2,))
 
-    # Accumulate translations
-    cum_shifts = np.cumsum(shifts, axis=1)
+#     # Accumulate translations
+#     cum_shifts = np.cumsum(shifts, axis=1)
 
-    translations = {}
-    for row_keys, row_shifts in zip(keys, cum_shifts):
-        for k, shift in zip(row_keys, row_shifts):
-            translations[k] = SimilarityTransform(translation=shift)
+#     translations = {}
+#     for row_keys, row_shifts in zip(keys, cum_shifts):
+#         for k, shift in zip(row_keys, row_shifts):
+#             translations[k] = SimilarityTransform(translation=shift)
 
-    return translations
+#     return translations
 
 
 def detect_features(img, ORB_kws=None):
@@ -195,8 +126,7 @@ def get_translations_robust(data):
     """
     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
     shape = get_shape(data)
-    keys = sort_keys(x_positions, y_positions, shape)
-    keys_T = np.array(keys).T.tolist()
+    keys = get_keys(data)
 
     ORB_kws = {'downscale': 2,
                'n_keypoints': 800,
@@ -216,7 +146,7 @@ def get_translations_robust(data):
             h_shifts.append(shift)
 
     v_shifts = []
-    for col in keys_T:
+    for col in keys.T:
         v_shifts.append(np.zeros(2))
         for k1, k2 in zip(col, col[1:]):
 
@@ -236,40 +166,45 @@ def get_translations_robust(data):
     translations = (cum_h_shifts.reshape(shape[-1]*2, 2) +
                     cum_v_shifts.reshape(shape[-1]*2, 2))
 
+    return translations
+
     translations = translations - translations[:, 1].min()
+    translations = translations.astype(np.int64)
 
-    return translations.astype(np.int64)
+    transforms = {}
+    for k, t in zip(keys.flatten(), translations):
+        transforms[k] = AffineTransform(translation=t)
+
+    return translations, transforms
 
 
-def tile_images(data, translations):
+def tile_images(data, translations, transforms):
     """
     Notes
     -----
     Will have to separate FM and EM images
     """
     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
-    keys = list(img_dict.keys())
+    keys = get_keys(data)
 
-    # translations = get_translations_robust(data)
-    shifts = np.array([tr for tr in translations.values()])
+    # translations, transforms = get_translations_robust(data)
 
     # import pickle
     # with open('translations.pickle', 'rb') as handle:
     #     translations = pickle.load(handle)
 
-    H_px, W_px = data[1][list(data[1].keys())[0]].shape
-    # TODO: output_shape currently cuts off -y dimension
+    H_px, W_px = FM_imgs[keys.flatten()[0]].shape
+
     output_shape = np.array(
-        [(shifts[:, 1].max() - shifts[:, 1].min()) + H_px,
-         (shifts[:, 0].max() - shifts[:, 0].min()) + W_px])
+        [translations[:, 1].max() - translations[:, 1].min() + H_px,
+         translations[:, 0].max() - translations[:, 0].min() + W_px])
 
     warpeds = {}
     masks = {}
 
-    for i, k in enumerate(keys):
+    for i, k in enumerate(keys.flatten()):
 
-        translation = AffineTransform(translation=translations[k]).inverse
-        warped = warp(FM_imgs[k], translation, order=3,
+        warped = warp(FM_imgs[k], transforms[k], order=3,
                       output_shape=output_shape, cval=-1)
 
         mask = (warped != -1)
@@ -284,20 +219,20 @@ def tile_images(data, translations):
     stitched_norm = np.true_divide(warpeds_stitched, masks_stitched,
                                    out=np.zeros_like(warpeds_stitched),
                                    where=(masks_stitched != 0))
-    return stitched_norm
+    return warpeds, masks
 
 
 if __name__ == '__main__':
-    dir_name = 'rat-pancreas2'
-    # dir_name = 'test_images'
-    filenames = ['rat-pancreas2//tile_4-2.h5',
-                 'rat-pancreas2//tile_4-3.h5',
-                 'rat-pancreas2//tile_4-4.h5',
-                 'rat-pancreas2//tile_5-2.h5',
-                 'rat-pancreas2//tile_5-3.h5',
-                 'rat-pancreas2//tile_5-4.h5']
+    dir_name = 'rat-pancreas'
+    # dir_name = 'nano-diamonds'
+    filenames = ['rat-pancreas//tile_4-2.h5',
+                 'rat-pancreas//tile_4-3.h5',
+                 'rat-pancreas//tile_4-4.h5',
+                 'rat-pancreas//tile_5-2.h5',
+                 'rat-pancreas//tile_5-3.h5',
+                 'rat-pancreas//tile_5-4.h5']
 
-    data = load_data(filenames=filenames)
+    data = odemis_data.load_data(filenames=filenames)
     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
 
     # stitched = tile_images(data)
