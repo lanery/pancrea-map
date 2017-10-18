@@ -190,7 +190,7 @@ def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
     gradient_cutoff : float
         Controls how far out of parallel lines can be to edges before
         correction is terminated. The default (2.) is good for most cases.
-        
+
     Returns:
     --------
     costs_arr : (M, N) ndarray of floats
@@ -241,7 +241,7 @@ def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
     return costs_arr
 
 
-def tile_images(data, translations, transforms):
+def tile_images(data):
     """
     Notes
     -----
@@ -250,7 +250,8 @@ def tile_images(data, translations, transforms):
     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
     keys = get_keys(data)
 
-    # translations, transforms = get_translations_robust(data)
+    translations, transforms = get_translations_robust(data)
+    print(translations)
 
     # import pickle
     # with open('translations.pickle', 'rb') as handle:
@@ -276,12 +277,34 @@ def tile_images(data, translations, transforms):
         warpeds[k] = warped
         masks[k] = mask
 
-    warpeds_stitched = np.sum(list(warpeds.values()), axis=0)
-    masks_stitched = np.sum(list(masks.values()), axis=0)
+    # warpeds_stitched = np.sum(list(warpeds.values()), axis=0)
+    # masks_stitched = np.sum(list(masks.values()), axis=0)
 
-    stitched_norm = np.true_divide(warpeds_stitched, masks_stitched,
-                                   out=np.zeros_like(warpeds_stitched),
-                                   where=(masks_stitched != 0))
+    # stitched_norm = np.true_divide(warpeds_stitched, masks_stitched,
+    #                                out=np.zeros_like(warpeds_stitched),
+    #                                where=(masks_stitched != 0))
+
+    ymax = output_shape[1] - 1
+    xmax = output_shape[0] - 1
+
+    mask_pts = [[0, ymax // 2],
+                [xmax, ymax // 2]]
+
+    costs = {}
+
+    for k1, k2 in zip(keys.flatten(), keys.flatten()[1:]):
+
+        costs[k] = generate_costs(np.abs(warpeds[k2] - warpeds[k1]), 
+                                  masks[k2] & masks[k1])
+        costs[0, :] = 0
+        costs[-1, :] = 0
+
+        pts, _ = route_through_array(costs, mask_pts[0], mask_pts[1],
+                                     fully_connected=True)
+        pts = np.array(pts)
+
+        # finish stitching
+
     return stitched_norm
 
 
