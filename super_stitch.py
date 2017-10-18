@@ -129,9 +129,9 @@ def get_translations_robust(data):
     keys = get_keys(data)
 
     ORB_kws = {'downscale': 2,
-               'n_keypoints': 800,
+               'n_keypoints': 1000,
                'fast_threshold': 0.05}
-    ransac_kws = {'max_trials': 600}
+    ransac_kws = {'max_trials': 800}
 
     h_shifts = []
     for row in keys:
@@ -163,12 +163,9 @@ def get_translations_robust(data):
     cum_h_shifts = np.cumsum(h_shifts, axis=1)
     cum_v_shifts = np.cumsum(v_shifts, axis=1)
 
-    translations = (cum_h_shifts.reshape(shape[-1]*2, 2) +
-                    cum_v_shifts.reshape(shape[-1]*2, 2))
-
-    return translations
-
-    translations = translations - translations[:, 1].min()
+    translations = cum_h_shifts + np.swapaxes(cum_v_shifts, 0, 1)
+    translations = translations.reshape(shape[-1]*2, 2)
+    translations[:, 1] = translations[:, 1] - translations[:, 1].min()
     translations = translations.astype(np.int64)
 
     transforms = {}
@@ -176,6 +173,72 @@ def get_translations_robust(data):
         transforms[k] = AffineTransform(translation=t)
 
     return translations, transforms
+
+
+def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
+    """
+    Ensures equal-cost paths from edges to region of interest.
+
+    Parameters:
+    -----------
+    diff_image : (M, N) ndarray of floats
+        Difference of two overlapping images.
+    mask : (M, N) ndarray of bools
+        Mask representing the region of interest in ``diff_image``.
+    vertical : bool
+        Control operation orientation.
+    gradient_cutoff : float
+        Controls how far out of parallel lines can be to edges before
+        correction is terminated. The default (2.) is good for most cases.
+        
+    Returns:
+    --------
+    costs_arr : (M, N) ndarray of floats
+        Adjusted costs array, ready for use.
+    """
+    if vertical is not True:
+        return tweak_costs(diff_image.T, mask.T, vertical=vertical,
+                           gradient_cutoff=gradient_cutoff).T
+
+    # Start with a high-cost array of 1's
+    costs_arr = np.ones_like(diff_image)
+
+    # Obtain extent of overlap
+    row, col = mask.nonzero()
+    cmin = col.min()
+    cmax = col.max()
+
+    # Label discrete regions
+    cslice = slice(cmin, cmax + 1)
+    labels = label(mask[:, cslice])
+
+    # Find distance from edge to region
+    upper = (labels == 0).sum(axis=0)
+    lower = (labels == 2).sum(axis=0)
+
+    # Reject areas of high change
+    ugood = np.abs(np.gradient(upper)) < gradient_cutoff
+    lgood = np.abs(np.gradient(lower)) < gradient_cutoff
+
+    # Give areas slightly farther from edge a cost break
+    costs_upper = np.ones_like(upper, dtype=np.float64)
+    costs_lower = np.ones_like(lower, dtype=np.float64)
+    costs_upper[ugood] = upper.min() / np.maximum(upper[ugood], 1)
+    costs_lower[lgood] = lower.min() / np.maximum(lower[lgood], 1)
+
+    # Expand from 1d back to 2d
+    vdist = mask.shape[0]
+    costs_upper = costs_upper[np.newaxis, :].repeat(vdist, axis=0)
+    costs_lower = costs_lower[np.newaxis, :].repeat(vdist, axis=0)
+
+    # Place these in output array
+    costs_arr[:, cslice] = costs_upper * (labels == 0)
+    costs_arr[:, cslice] +=  costs_lower * (labels == 2)
+
+    # Finally, place the difference image
+    costs_arr[mask] = diff_image[mask]
+
+    return costs_arr
 
 
 def tile_images(data, translations, transforms):
@@ -204,7 +267,7 @@ def tile_images(data, translations, transforms):
 
     for i, k in enumerate(keys.flatten()):
 
-        warped = warp(FM_imgs[k], transforms[k], order=3,
+        warped = warp(FM_imgs[k], transforms[k].inverse, order=3,
                       output_shape=output_shape, cval=-1)
 
         mask = (warped != -1)
@@ -219,7 +282,7 @@ def tile_images(data, translations, transforms):
     stitched_norm = np.true_divide(warpeds_stitched, masks_stitched,
                                    out=np.zeros_like(warpeds_stitched),
                                    where=(masks_stitched != 0))
-    return warpeds, masks
+    return stitched_norm
 
 
 if __name__ == '__main__':
@@ -235,7 +298,7 @@ if __name__ == '__main__':
     data = odemis_data.load_data(filenames=filenames)
     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
 
-    # stitched = tile_images(data)
+    stitched = tile_images(data)
 
     # fig, ax = plt.subplots()
     # ax.imshow(stitched)
