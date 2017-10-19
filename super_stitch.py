@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 19-10-2017 17:54:59
+@Last Modified time: 19-10-2017 17:55:43
 """
 
 import os
@@ -401,4 +401,4 @@ if __name__ == '__main__':
     # fig, ax = plt.subplots()
     # ax.imshow(stitched)
 
-    warpeds, mcp_masks = warp_images(data)
+    stitched = warp_images(data)
