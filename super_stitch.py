@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 19-10-2017 17:18:35
+@Last Modified time: 19-10-2017 17:54:59
 """
 
 import os
@@ -333,8 +333,7 @@ def warp_images(data):
 
     h_mcp_masks = np.array(h_mcp_masks).reshape(2, 2, 3438, 5264)
     v_mcp_masks = np.array(v_mcp_masks)
-    # mcp_masks = {}
-    stitched = np.zeros(output_shape)
+    mcp_masks = {}
 
     for i, row in enumerate(keys):
         cum_mask = h_mcp_masks[i].sum(axis=0)
@@ -344,8 +343,14 @@ def warp_images(data):
             h_mcp_mask = np.where(cum_mask == Nx - (j + 1), 1, 0)
             v_mcp_mask = np.where(v_mcp_masks[j] == Ny - (i + 1), 1, 0)
             mcp_mask = np.sum((h_mcp_mask, v_mcp_mask), axis=0)
-            # mcp_masks[k] = np.where(mcp_mask == mcp_mask.max(), 1, 0)
-            stitched = stitched + np.where(mcp_mask, warpeds[k], 0)
+            mcp_masks[k] = np.where(mcp_mask == mcp_mask.max(), 1, 0)
+
+    stitched = []
+    for k in keys.flatten():
+        patch = np.where(mcp_masks[k], warpeds[k], 0)
+        stitched.append(patch)
+
+    stitched = np.sum(stitched, axis=0)
 
     return stitched
 
@@ -396,4 +401,4 @@ if __name__ == '__main__':
     # fig, ax = plt.subplots()
     # ax.imshow(stitched)
 
-    stitched = warp_images(data)
+    warpeds, mcp_masks = warp_images(data)
