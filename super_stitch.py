@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 19-10-2017 12:05:22
+@Last Modified time: 19-10-2017 17:18:35
 """
 
 import os
@@ -279,7 +279,75 @@ def warp_images(data):
         warpeds[k] = warped
         masks[k] = mask
 
-    return warpeds, masks, output_shape
+
+    h_mcp_masks = []
+    v_mcp_masks = []
+
+    xmax, ymax = output_shape - 1
+    Nx, Ny = shape[::-1]
+
+    for row in keys:
+        for i, (k1, k2) in enumerate(zip(row, row[1:])):
+
+            costs = generate_costs(np.abs(warpeds[k2] - warpeds[k1]),
+                                   masks[k2] & masks[k1])
+            costs[0, :] = 0
+            costs[-1, :] = 0
+
+            mask_pts = [[0, ymax * (i+1) // Nx],
+                        [xmax, ymax * (i+1) // Nx]]
+
+            mcp, _ = route_through_array(costs, mask_pts[0], mask_pts[1],
+                                         fully_connected=True)
+            mcp = np.array(mcp)
+
+            mcp_mask = np.zeros(output_shape, dtype=np.uint8)
+            mcp_mask[mcp[:, 0], mcp[:, 1]] = 1
+
+            mcp_mask = (label(mcp_mask, connectivity=1, background=-1) == 1)
+
+            h_mcp_masks.append(mcp_mask)
+
+    for col in keys.T:
+        for i, (k1, k2) in enumerate(zip(col, col[1:])):
+
+            costs = generate_costs(np.abs(warpeds[k2] - warpeds[k1]),
+                                   masks[k2] & masks[k1])
+            costs[0, :] = 0
+            costs[-1, :] = 0
+
+            mask_pts = [[xmax * (i+1) // Ny, 0],
+                        [xmax * (i+1) // Ny, ymax]]
+
+            mcp, _ = route_through_array(costs, mask_pts[0], mask_pts[1],
+                                         fully_connected=True)
+            mcp = np.array(mcp)
+
+            mcp_mask = np.zeros(output_shape, dtype=np.uint8)
+            mcp_mask[mcp[:, 0], mcp[:, 1]] = 1
+
+            mcp_mask = (label(mcp_mask, connectivity=1, background=-1) == 1)
+
+            v_mcp_masks.append(mcp_mask)
+
+
+    h_mcp_masks = np.array(h_mcp_masks).reshape(2, 2, 3438, 5264)
+    v_mcp_masks = np.array(v_mcp_masks)
+    # mcp_masks = {}
+    stitched = np.zeros(output_shape)
+
+    for i, row in enumerate(keys):
+        cum_mask = h_mcp_masks[i].sum(axis=0)
+
+        for j, k in enumerate(row):
+
+            h_mcp_mask = np.where(cum_mask == Nx - (j + 1), 1, 0)
+            v_mcp_mask = np.where(v_mcp_masks[j] == Ny - (i + 1), 1, 0)
+            mcp_mask = np.sum((h_mcp_mask, v_mcp_mask), axis=0)
+            # mcp_masks[k] = np.where(mcp_mask == mcp_mask.max(), 1, 0)
+            stitched = stitched + np.where(mcp_mask, warpeds[k], 0)
+
+    return stitched
 
 
 def tile_images(data):
@@ -303,37 +371,8 @@ def tile_images(data):
     # return stitched_norm
 
 
-    warpeds, masks, output_shape = warp_images(data)
 
-    h_mcp_masks = []
-    v_mcp_masks = []
 
-    for row in keys:
-        for i, (k1, k2) in enumerate(zip(row, row[1:])):
-
-            costs = generate_costs(np.abs(warpeds[k2] - warpeds[k1]),
-                                   masks[k2] & masks[k1])
-            costs[0, :] = 0
-            costs[-1, :] = 0
-
-            xmax, ymax = output_shape - 1
-            Nx, Ny = shape[::-1]
-
-            mask_pts = [[0, ymax * (i+1) // Nx],
-                        [xmax, ymax * (i+1) // Nx]]
-
-            mcp, _ = route_through_array(costs, mask_pts[0], mask_pts[1],
-                                         fully_connected=True)
-            mcp = np.array(mcp)
-
-            mcp_mask = np.zeros(output_shape, dtype=np.uint8)
-            mcp_mask[mcp[:, 0], mcp[:, 1]] = 1
-
-            mcp_mask = (label(mcp_mask, connectivity=1, background=-1) == 1)
-
-            h_mcp_masks.append(mcp_mask)
-
-    return warpeds, h_mcp_masks
 
 
 
@@ -349,8 +388,12 @@ if __name__ == '__main__':
 
     data = odemis_data.load_data(filenames=filenames)
     FM_imgs, EM_imgs, x_positions, y_positions = data
+    keys = get_keys(data)
+    shape = get_shape(data)
 
     # stitched = tile_images(data)
 
     # fig, ax = plt.subplots()
     # ax.imshow(stitched)
+
+    stitched = warp_images(data)
