@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 18-10-2017 18:50:10
+@Last Modified time: 19-10-2017 12:05:22
 """
 
 import os
@@ -26,7 +26,7 @@ import odemis_utils
 def get_shape(data):
     """
     """
-    img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
+    FM_imgs, EM_imgs, x_positions, y_positions = data
 
     xs = np.array(list(x_positions.values()))
     ys = np.array(list(y_positions.values()))
@@ -43,7 +43,7 @@ def get_keys(data):
     """
     import pandas as pd
 
-    img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
+    FM_imgs, EM_imgs, x_positions, y_positions = data
     shape = get_shape(data)
 
     df = pd.DataFrame([x_positions, y_positions]).T
@@ -56,7 +56,7 @@ def get_keys(data):
 # def get_translations_fast(data):
 #     """
 #     """
-#     img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
+#     FM_imgs, EM_imgs, x_positions, y_positions = data
 #     shape = get_shape(data)
 #     keys = get_keys(data)
 
@@ -124,9 +124,9 @@ def estimate_transform(img1, img2, ORB_kws=None, ransac_kws=None):
 def get_translations_robust(data):
     """
     """
-    img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
-    shape = get_shape(data)
+    FM_imgs, EM_imgs, x_positions, y_positions = data
     keys = get_keys(data)
+    shape = get_shape(data)
 
     ORB_kws = {'downscale': 2,
                'n_keypoints': 1000,
@@ -241,21 +241,23 @@ def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
     return costs_arr
 
 
-def tile_images(data):
+def warp_images(data):
     """
-    Notes
-    -----
-    Will have to separate FM and EM images
     """
-    img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
+    # translations, transforms = get_translations_robust(data)
     keys = get_keys(data)
+    shape = get_shape(data)
 
-    translations, transforms = get_translations_robust(data)
-    print(translations)
+    translations = np.array([[0,     116],
+                             [1151,   60],
+                             [2316,    0],
+                             [ 157, 1278],
+                             [1439, 1216],
+                             [2704, 1148]], dtype=np.int64)
+    transforms = {}
+    for k, t in zip(keys.flatten(), translations):
+        transforms[k] = AffineTransform(translation=t)
 
-    # import pickle
-    # with open('translations.pickle', 'rb') as handle:
-    #     translations = pickle.load(handle)
 
     H_px, W_px = FM_imgs[keys.flatten()[0]].shape
 
@@ -277,6 +279,20 @@ def tile_images(data):
         warpeds[k] = warped
         masks[k] = mask
 
+    return warpeds, masks, output_shape
+
+
+def tile_images(data):
+    """
+    Notes
+    -----
+    Will have to separate FM and EM images
+    """
+    FM_imgs, EM_imgs, x_positions, y_positions = data
+    keys = get_keys(data)
+    shape = get_shape(data)
+
+
     # warpeds_stitched = np.sum(list(warpeds.values()), axis=0)
     # masks_stitched = np.sum(list(masks.values()), axis=0)
 
@@ -284,28 +300,41 @@ def tile_images(data):
     #                                out=np.zeros_like(warpeds_stitched),
     #                                where=(masks_stitched != 0))
 
-    ymax = output_shape[1] - 1
-    xmax = output_shape[0] - 1
+    # return stitched_norm
 
-    mask_pts = [[0, ymax // 2],
-                [xmax, ymax // 2]]
 
-    costs = {}
+    warpeds, masks, output_shape = warp_images(data)
 
-    for k1, k2 in zip(keys.flatten(), keys.flatten()[1:]):
+    h_mcp_masks = []
+    v_mcp_masks = []
 
-        costs[k] = generate_costs(np.abs(warpeds[k2] - warpeds[k1]), 
-                                  masks[k2] & masks[k1])
-        costs[0, :] = 0
-        costs[-1, :] = 0
+    for row in keys:
+        for i, (k1, k2) in enumerate(zip(row, row[1:])):
 
-        pts, _ = route_through_array(costs, mask_pts[0], mask_pts[1],
-                                     fully_connected=True)
-        pts = np.array(pts)
+            costs = generate_costs(np.abs(warpeds[k2] - warpeds[k1]),
+                                   masks[k2] & masks[k1])
+            costs[0, :] = 0
+            costs[-1, :] = 0
 
-        # finish stitching
+            xmax, ymax = output_shape - 1
+            Nx, Ny = shape[::-1]
 
-    return stitched_norm
+            mask_pts = [[0, ymax * (i+1) // Nx],
+                        [xmax, ymax * (i+1) // Nx]]
+
+            mcp, _ = route_through_array(costs, mask_pts[0], mask_pts[1],
+                                         fully_connected=True)
+            mcp = np.array(mcp)
+
+            mcp_mask = np.zeros(output_shape, dtype=np.uint8)
+            mcp_mask[mcp[:, 0], mcp[:, 1]] = 1
+
+            mcp_mask = (label(mcp_mask, connectivity=1, background=-1) == 1)
+
+            h_mcp_masks.append(mcp_mask)
+
+    return warpeds, h_mcp_masks
+
 
 
 if __name__ == '__main__':
@@ -319,9 +348,9 @@ if __name__ == '__main__':
                  'rat-pancreas//tile_5-4.h5']
 
     data = odemis_data.load_data(filenames=filenames)
-    img_dict, FM_imgs, EM_imgs, x_positions, y_positions = data
+    FM_imgs, EM_imgs, x_positions, y_positions = data
 
-    stitched = tile_images(data)
+    # stitched = tile_images(data)
 
     # fig, ax = plt.subplots()
     # ax.imshow(stitched)

@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   18-10-2017 15:41:15
 @Last Modified by:   rlane
-@Last Modified time: 18-10-2017 15:46:13
+@Last Modified time: 19-10-2017 10:57:35
 
 Module for reading and writing image data
 """
@@ -86,5 +86,5 @@ def load_data(dir_name=None, filenames=None):
             y_positions[k] = (
                 h5['Acquisition0']['ImageData']['YOffset'].value * 1e6)
 
-    data = img_dict, FM_imgs, EM_imgs, x_positions, y_positions
+    data = FM_imgs, EM_imgs, x_positions, y_positions
     return data
