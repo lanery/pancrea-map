@@ -3,17 +3,19 @@
 @Author: rlane
 @Date:   18-10-2017 15:41:15
 @Last Modified by:   rlane
-@Last Modified time: 19-10-2017 10:57:35
+@Last Modified time: 20-10-2017 13:44:21
 
 Module for reading and writing image data
 """
 
 import os
 from glob import glob
-from skimage.external import tifffile
 import h5py
 
-from odemis_utils import auto_bc
+from skimage.external import tifffile
+from skimage.transform import pyramid_reduce
+
+from .odemis_utils import auto_bc
 
 
 def load_data(dir_name=None, filenames=None):
@@ -69,10 +71,12 @@ def load_data(dir_name=None, filenames=None):
 
         for k, h5 in img_dict.items():
             try:
-                FM_imgs[k] = h5['Acquisition0']['ImageData']['Image'].value
-                FM_imgs[k] = auto_bc(FM_imgs[k])
-                if len(FM_imgs[k].shape) > 3:
-                    FM_imgs[k] = FM_imgs[k][0,0,0,:,:]
+                FM_img_raw = h5['Acquisition0']['ImageData']['Image'].value
+                FM_img_abc = auto_bc(FM_img_raw)
+                if len(FM_img_abc.shape) > 3:
+                    FM_img_sliced = FM_img_abc[0,0,0,:,:]
+                # FM_img_red = pyramid_reduce(FM_img_sliced)
+                FM_imgs[k] = FM_img_sliced
             except KeyError:
                 pass
 

@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 19-10-2017 17:55:43
+@Last Modified time: 20-10-2017 17:21:31
 """
 
 import os
@@ -19,8 +19,7 @@ from skimage.transform import SimilarityTransform, AffineTransform, warp
 from skimage.graph import route_through_array
 from skimage.measure import label, ransac
 
-import odemis_data
-import odemis_utils
+from .odemis_data import load_data
 
 
 def get_shape(data):
@@ -53,7 +52,7 @@ def get_keys(data):
     return keys
 
 
-# def get_translations_fast(data):
+def get_translations_fast(data):
 #     """
 #     """
 #     FM_imgs, EM_imgs, x_positions, y_positions = data
@@ -79,13 +78,19 @@ def get_keys(data):
 #         for k, shift in zip(row_keys, row_shifts):
 #             translations[k] = SimilarityTransform(translation=shift)
 
-#     return translations
+    return None
 
 
 def detect_features(img, ORB_kws=None):
     """
     """
     ORB_kws = {} if ORB_kws is None else ORB_kws
+    default_ORB_kws = {
+        'downscale': 2,
+        'n_keypoints': 1000,
+        'fast_threshold': 0.05
+    }
+    ORB_kws = {**default_ORB_kws, **ORB_kws}
 
     orb = ORB(**ORB_kws)
 
@@ -114,24 +119,23 @@ def estimate_transform(img1, img2, ORB_kws=None, ransac_kws=None):
     dst = kps_img1[matches[:, 0]][:, ::-1]
 
     ransac_kws = {} if ransac_kws is None else ransac_kws
+    default_ransac_kws = {
+        'min_samples': 4,
+        'residual_threshold': 1,
+        'max_trials': 800
+    }
+    ransac_kws = {**default_ransac_kws, **ransac_kws}
 
-    model, inliers = ransac((src, dst), AffineTransform,
-                            min_samples=4, residual_threshold=1,
-                            **ransac_kws)
+    model, inliers = ransac((src, dst), AffineTransform, **ransac_kws)
     return model
 
 
-def get_translations_robust(data):
+def get_translations_robust(data, ORB_kws=None, ransac_kws=None):
     """
     """
     FM_imgs, EM_imgs, x_positions, y_positions = data
     keys = get_keys(data)
     shape = get_shape(data)
-
-    ORB_kws = {'downscale': 2,
-               'n_keypoints': 1000,
-               'fast_threshold': 0.05}
-    ransac_kws = {'max_trials': 800}
 
     h_shifts = []
     for row in keys:
@@ -141,7 +145,6 @@ def get_translations_robust(data):
             model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
                                        ORB_kws=ORB_kws,
                                        ransac_kws=ransac_kws)
-
             shift = model.translation
             h_shifts.append(shift)
 
@@ -153,7 +156,6 @@ def get_translations_robust(data):
             model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
                                        ORB_kws=ORB_kws,
                                        ransac_kws=ransac_kws)
-
             shift = model.translation
             v_shifts.append(shift)
 
@@ -168,11 +170,16 @@ def get_translations_robust(data):
     translations[:, 1] = translations[:, 1] - translations[:, 1].min()
     translations = translations.astype(np.int64)
 
-    transforms = {}
-    for k, t in zip(keys.flatten(), translations):
-        transforms[k] = AffineTransform(translation=t)
+    return translations
 
-    return translations, transforms
+    # translations = np.array([[0,     116],
+    #                          [1151,   60],
+    #                          [2316,    0],
+    #                          [ 157, 1278],
+    #                          [1439, 1216],
+    #                          [2704, 1148]], dtype=np.int64)
+
+    # return translations
 
 
 def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
@@ -248,12 +255,8 @@ def warp_images(data):
     keys = get_keys(data)
     shape = get_shape(data)
 
-    translations = np.array([[0,     116],
-                             [1151,   60],
-                             [2316,    0],
-                             [ 157, 1278],
-                             [1439, 1216],
-                             [2704, 1148]], dtype=np.int64)
+    translations = get_translations_robust(data)
+
     transforms = {}
     for k, t in zip(keys.flatten(), translations):
         transforms[k] = AffineTransform(translation=t)
@@ -377,10 +380,6 @@ def tile_images(data):
 
 
 
-
-
-
-
 if __name__ == '__main__':
     dir_name = 'rat-pancreas'
     # dir_name = 'nano-diamonds'
@@ -391,7 +390,7 @@ if __name__ == '__main__':
                  'rat-pancreas//tile_5-3.h5',
                  'rat-pancreas//tile_5-4.h5']
 
-    data = odemis_data.load_data(filenames=filenames)
+    data = load_data(filenames=filenames)
     FM_imgs, EM_imgs, x_positions, y_positions = data
     keys = get_keys(data)
     shape = get_shape(data)
