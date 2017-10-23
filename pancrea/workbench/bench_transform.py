@@ -2,7 +2,7 @@
 # @Author: Ryan Lane
 # @Date:   2017-10-22 11:33:08
 # @Last Modified by:   rlane
-# @Last Modified time: 23-10-2017 15:35:10
+# @Last Modified time: 23-10-2017 15:57:59
 
 import os
 import numpy as np
@@ -14,7 +14,6 @@ from .bench_utils import dict_product
 
 from ..odemis_data import load_data
 from ..stitch import get_keys, get_shape, estimate_transform
-
 
 
 def benchtest_transform(img1, img2):
@@ -73,7 +72,7 @@ def benchtest_transform(img1, img2):
                 model = estimate_transform(
                     img1, img2, ORB_kws=ORB_kws, ransac_kws=ransac_kws)
                 dX, dY = model.translation
-            except Exception:
+            except ValueError:
                 dX, dY = (0, 0)
 
             end = time.clock()

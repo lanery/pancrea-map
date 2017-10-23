@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 20-10-2017 17:21:31
+@Last Modified time: 23-10-2017 16:44:16
 """
 
 import os
@@ -24,6 +24,7 @@ from .odemis_data import load_data
 
 def get_shape(data):
     """
+    Get overall shape of the image array (y rows of images by x columns)
     """
     FM_imgs, EM_imgs, x_positions, y_positions = data
 
@@ -39,6 +40,7 @@ def get_shape(data):
 
 def get_keys(data):
     """
+    Get keys of image array (basenames of image files)
     """
     import pandas as pd
 
@@ -52,37 +54,10 @@ def get_keys(data):
     return keys
 
 
-def get_translations_fast(data):
-#     """
-#     """
-#     FM_imgs, EM_imgs, x_positions, y_positions = data
-#     shape = get_shape(data)
-#     keys = get_keys(data)
-
-#     shifts = []
-#     for row in keys:
-#         shifts.append(np.zeros(2))
-#         for k1, k2 in zip(row, row[1:]):
-#             shift, error, phase_difference = register_translation(
-#                 FM_imgs[k1], FM_imgs[k2])
-#             shifts.append(shift[::-1])
-
-#     # Convert shifts to numpy array
-#     shifts = np.array(shifts).reshape(shape + (2,))
-
-#     # Accumulate translations
-#     cum_shifts = np.cumsum(shifts, axis=1)
-
-#     translations = {}
-#     for row_keys, row_shifts in zip(keys, cum_shifts):
-#         for k, shift in zip(row_keys, row_shifts):
-#             translations[k] = SimilarityTransform(translation=shift)
-
-    return None
-
-
 def detect_features(img, ORB_kws=None):
     """
+    Detect features using ORB
+    Wrapper for `skimage.feature.ORB`
     """
     ORB_kws = {} if ORB_kws is None else ORB_kws
     default_ORB_kws = {
@@ -103,6 +78,8 @@ def detect_features(img, ORB_kws=None):
 
 def find_matches(img1, img2, ORB_kws=None):
     """
+    Find matches between images
+    Wrapper for `skimage.feature.match_descriptors`
     """
     kps_img1, dps_img1 = detect_features(img1, ORB_kws=ORB_kws)
     kps_img2, dps_img2 = detect_features(img2, ORB_kws=ORB_kws)
@@ -113,6 +90,8 @@ def find_matches(img1, img2, ORB_kws=None):
 
 def estimate_transform(img1, img2, ORB_kws=None, ransac_kws=None):
     """
+    Estimate Affine transformation between two images
+    Wrapper for `skimage.measure.ransac` assuming AffineTransform
     """
     kps_img1, kps_img2, matches = find_matches(img1, img2, ORB_kws=ORB_kws)
     src = kps_img2[matches[:, 1]][:, ::-1]
@@ -130,7 +109,37 @@ def estimate_transform(img1, img2, ORB_kws=None, ransac_kws=None):
     return model
 
 
-def get_translations_robust(data, ORB_kws=None, ransac_kws=None):
+def estimate_translation(img1, img2, FFT_kws=None):
+    """
+    Estimate lateral translation between two images
+    Wrapper for `skimage.feature.register_translation`
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+
+    Notes
+    -----
+    http://scikit-image.org/docs/dev/api/skimage.feature.html#skimage.feature.register_translation
+    """
+
+    FFT_kws = {} if FFT_kws is None else FFT_kws
+    default_FFT_kws = {
+        'upsample_factor': 1,
+        'space': 'real'
+    }
+    FFT_kws = {**default_FFT_kws, **FFT_kws}
+
+    shifts, error, phase_difference = register_translation(
+        img1, img2, **FFT_kws)
+
+    return shifts
+    
+
+def get_translations(data, method='robust', FFT_kws=None,
+                     ORB_kws=None, ransac_kws=None):
     """
     """
     FM_imgs, EM_imgs, x_positions, y_positions = data
@@ -142,10 +151,15 @@ def get_translations_robust(data, ORB_kws=None, ransac_kws=None):
         h_shifts.append(np.zeros(2))
         for k1, k2 in zip(row, row[1:]):
 
-            model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
-                                       ORB_kws=ORB_kws,
-                                       ransac_kws=ransac_kws)
-            shift = model.translation
+            if method == 'robust':
+                model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
+                                           ORB_kws=ORB_kws,
+                                           ransac_kws=ransac_kws)
+                shift = model.translation
+            else:
+                shift = estimate_translation(FM_imgs[k1], FM_imgs[k2],
+                                             FFT_kws=FFT_kws)
+
             h_shifts.append(shift)
 
     v_shifts = []
@@ -153,10 +167,15 @@ def get_translations_robust(data, ORB_kws=None, ransac_kws=None):
         v_shifts.append(np.zeros(2))
         for k1, k2 in zip(col, col[1:]):
 
-            model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
-                                       ORB_kws=ORB_kws,
-                                       ransac_kws=ransac_kws)
-            shift = model.translation
+            if method == 'robust':
+                model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
+                                           ORB_kws=ORB_kws,
+                                           ransac_kws=ransac_kws)
+                shift = model.translation
+            else:
+                shift = estimate_translation(FM_imgs[k1], FM_imgs[k2],
+                                             FFT_kws=FFT_kws)
+
             v_shifts.append(shift)
 
     h_shifts = np.array(h_shifts).reshape(shape + (2,))
@@ -172,22 +191,13 @@ def get_translations_robust(data, ORB_kws=None, ransac_kws=None):
 
     return translations
 
-    # translations = np.array([[0,     116],
-    #                          [1151,   60],
-    #                          [2316,    0],
-    #                          [ 157, 1278],
-    #                          [1439, 1216],
-    #                          [2704, 1148]], dtype=np.int64)
-
-    # return translations
-
 
 def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
     """
     Ensures equal-cost paths from edges to region of interest.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     diff_image : (M, N) ndarray of floats
         Difference of two overlapping images.
     mask : (M, N) ndarray of bools
@@ -198,8 +208,8 @@ def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
         Controls how far out of parallel lines can be to edges before
         correction is terminated. The default (2.) is good for most cases.
 
-    Returns:
-    --------
+    Returns
+    -------
     costs_arr : (M, N) ndarray of floats
         Adjusted costs array, ready for use.
     """

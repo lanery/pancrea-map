@@ -1,69 +1,106 @@
 # -*- coding: utf-8 -*-
-"""
-@Author: rlane
-@Date:   20-10-2017 10:39:06
-@Last Modified by:   rlane
-@Last Modified time: 20-10-2017 17:27:08
-"""
+# @Author: Ryan Lane
+# @Date:   2017-10-22 11:33:08
+# @Last Modified by:   rlane
+# @Last Modified time: 23-10-2017 16:42:35
 
+import os
+import numpy as np
+import pandas as pd
+import time
 from tqdm import tqdm
 
 from .bench_utils import dict_product
 
 from ..odemis_data import load_data
-from ..stitch import get_keys, get_shape, get_translations_robust
-
-import logging
-logfile = 'pancrea//workbench//translation.log'
-logging.basicConfig(filename=logfile, filemode='w', level=logging.INFO)
-log = logging.getLogger(__name__)
+from ..stitch import get_keys, get_shape, estimate_translation
 
 
-def benchtest_translation(data):
+def benchtest_translation(img1, img2):
     """
-    """
+    Runs benchmark tests for `stitch.estimate_translation`
 
-    ORB_arg_dict = {
-        'downscale': 2,
-        'n_keypoints': [800, 1000],
-        'fast_threshold': 0.05
+    Parameters
+    ----------
+    img1 : ndarray
+        Image data for first image
+    img2 : ndarray
+        Image data for seond image. Must have some overlap with img1 otherwise
+        this test is pointless and the transformation estimation will either
+        error or be bogus
+
+    Returns
+    -------
+    out : pd.DataFrame
+        Results of the benchmark test in the form of a pandas dataframe
+        Results include parameters for the FFT cross-correlation algorithms
+        along with the translations in x and y and runtime. If estimate transform fails in any way, x and y translation are passed on as 0.
+    """
+    # Parameters for FFT cross-correlation
+    FFT_arg_dict = {
+        'upsample_factor': [1, 2, 5, 10],
+        'space': ['real']
     }
 
-    ransac_arg_dict = {
-        'min_samples': [4],
-        'residual_threshold': 1,
-        'max_trials': [600]
-    }
+    # Get all possible combinations of parameter space
+    FFT_kws_list = dict_product(FFT_arg_dict)
 
-    ORB_kws_list = dict_product(ORB_arg_dict)
-    ransac_kws_list = dict_product(ransac_arg_dict)
+    # Instantiate dataframe
+    df_out = pd.DataFrame()
 
-    for ORB_kws in tqdm(ORB_kws_list, desc='ORB', ascii=True):
-        for ransac_kws in tqdm(ransac_kws_list, desc='RANSAC', ascii=True):
+    FFT_desc = "Cylcing through FFT Parameters"
 
-            log.info('ORB parameters')
-            log.info(ORB_kws)
-            log.info('RANSAC parameters')
-            log.info(ransac_kws)
+    # Loop through FFT parameter set to apply estimate_translation
+    for FFT_kws in tqdm(FFT_kws_list, desc=FFT_desc, ascii=True):
 
-            translations = get_translations_robust(data,
-                                                   ORB_kws=ORB_kws,
-                                                   ransac_kws=ransac_kws)
+        params = FFT_kws
+        start = time.clock()
 
-            log.info('Translations')
-            log.info(translations)
+        try:
+            shift = estimate_translation(img1, img2, FFT_kws=FFT_kws)
+            dX, dY = shift
+        except ValueError:
+            dX, dY = (0, 0)
 
+        end = time.clock()
+        results = {
+            'dX': dX,
+            'dY': dY,
+            't': (end - start)
+        }
+
+        df_out = df_out.append({**params, **results}, ignore_index=True)
+
+    # Reorder dataframe columns so results come last
+    cols = list(params.keys()) + list(results.keys())
+    df_out = df_out.loc[:, cols]
+
+    return df_out
 
 
 if __name__ == '__main__':
 
-    filenames = ['sample_data/rat-pancreas//tile_4-2.h5',
-                 'sample_data/rat-pancreas//tile_4-3.h5',
-                 'sample_data/rat-pancreas//tile_4-4.h5',
-                 'sample_data/rat-pancreas//tile_5-2.h5',
-                 'sample_data/rat-pancreas//tile_5-3.h5',
-                 'sample_data/rat-pancreas//tile_5-4.h5']
+    # Load data
+    dir_name = 'sample_data//rat-pancreas'
+    data = load_data(dir_name=dir_name)
+    FM_imgs, EM_imgs, x_positions, y_positions = data
+    keys = get_keys(data)
+    shape = get_shape(data)
 
-    data = load_data(filenames=filenames)
+    # Select random image pair
+    img_pairs = []
+    for row in keys:
+        img_pairs.append(list(zip(row, row[1:])))
+    img_pairs = np.array(img_pairs).reshape(shape[0] * (shape[1] - 1), 2)
+    rand_img_pair = img_pairs[np.random.randint(12)]
 
-    bench_translations(data)
+    # Run bench test
+    df_out = benchtest_translation(FM_imgs[rand_img_pair[0]],
+                                 FM_imgs[rand_img_pair[1]])
+
+    # Save results to log file
+    logfile = 'pancrea//workbench//log_translation.log'
+    if os.path.exists(logfile):
+        df_out.to_csv(logfile, mode='a', header=False, index=False)
+    else:
+        df_out.to_csv(logfile, header=df_out.columns, index=False)
