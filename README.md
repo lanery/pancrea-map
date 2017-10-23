@@ -1,2 +1,2 @@
-# pancrea-map
+# pancrea
 Small library for image stitching algorithms

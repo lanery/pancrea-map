@@ -6,37 +6,20 @@
 @Last Modified time: 20-10-2017 17:27:08
 """
 
-from itertools import product
+from tqdm import tqdm
 
-from .. odemis_data import load_data
-from .. stitch import get_keys, get_shape, get_translations_robust
+from .bench_utils import dict_product
+
+from ..odemis_data import load_data
+from ..stitch import get_keys, get_shape, get_translations_robust
 
 import logging
 logfile = 'pancrea//workbench//translation.log'
-logging.basicConfig(filename=logfile, level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(filename=logfile, filemode='w', level=logging.INFO)
+log = logging.getLogger(__name__)
 
 
-def dict_product(arg_dict):
-    """
-    """
-    # Wrap all non-list dict values (floats/ints) in a list
-    # so that they can be handled by product
-    for k, v in arg_dict.items():
-        try:
-            arg_dict[k] = [float(v)]
-        except TypeError:
-            pass
-
-    # Create cartesian product from dict values
-    dict_list = []
-    for val in product(*arg_dict.values()):
-        dict_list.append(dict(zip(arg_dict, val)))
-
-    return dict_list
-
-
-def bench_translations(data):
+def benchtest_translation(data):
     """
     """
 
@@ -55,20 +38,20 @@ def bench_translations(data):
     ORB_kws_list = dict_product(ORB_arg_dict)
     ransac_kws_list = dict_product(ransac_arg_dict)
 
-    for ORB_kws in ORB_kws_list:
-        for ransac_kws in ransac_kws_list:
+    for ORB_kws in tqdm(ORB_kws_list, desc='ORB', ascii=True):
+        for ransac_kws in tqdm(ransac_kws_list, desc='RANSAC', ascii=True):
 
-            logger.info('ORB parameters')
-            logger.info(ORB_kws)
-            logger.info('RANSAC parameters')
-            logger.info(ransac_kws)
+            log.info('ORB parameters')
+            log.info(ORB_kws)
+            log.info('RANSAC parameters')
+            log.info(ransac_kws)
 
-            translations = get_translations_robust(data, 
+            translations = get_translations_robust(data,
                                                    ORB_kws=ORB_kws,
                                                    ransac_kws=ransac_kws)
 
-            logger.info('Translations')
-            logger.info(translations)
+            log.info('Translations')
+            log.info(translations)
 
 
 
