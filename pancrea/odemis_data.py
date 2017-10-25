@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   18-10-2017 15:41:15
 @Last Modified by:   rlane
-@Last Modified time: 20-10-2017 13:44:21
+@Last Modified time: 25-10-2017 18:22:24
 
 Module for reading and writing image data
 """
@@ -73,6 +73,7 @@ def load_data(dir_name=None, filenames=None):
             try:
                 FM_img_raw = h5['Acquisition0']['ImageData']['Image'].value
                 FM_img_abc = auto_bc(FM_img_raw)
+                # FM_img_abc = FM_img_raw
                 if len(FM_img_abc.shape) > 3:
                     FM_img_sliced = FM_img_abc[0,0,0,:,:]
                 # FM_img_red = pyramid_reduce(FM_img_sliced)

@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 25-10-2017 14:48:12
+@Last Modified time: 25-10-2017 18:31:18
 """
 
 import os
@@ -283,7 +283,7 @@ def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
     return costs_arr
 
 
-def warp_images(data):
+def warp_images(data, translations):
     """
 
     Parameters
@@ -292,10 +292,11 @@ def warp_images(data):
     Returns
     -------
     """
+    FM_imgs, EM_imgs, x_positions, y_positions = data
     keys = get_keys(data)
     shape = get_shape(data)
 
-    translations = get_translations(data)
+    # translations = get_translations(data)
 
     transforms = {}
     for k, t in zip(keys.flatten(), translations):
@@ -460,10 +461,17 @@ if __name__ == '__main__':
     keys = get_keys(data)
     shape = get_shape(data)
 
-    # stitched = tile_images(data)
+    ORB_kws = {
+        'downscale': 2,
+        'n_keypoints': 2000,
+        'fast_threshold': 0.05}
 
-    # fig, ax = plt.subplots()
-    # ax.imshow(stitched)
+    ransac_kws = {
+        'min_samples': 5,
+        'residual_threshold': 10,
+        'max_trials': 5000}
 
-    cum_h_shifts, cum_v_shifts = get_translations(data)
+    translations = get_translations(data,
+                                    ORB_kws=ORB_kws,
+                                    ransac_kws=ransac_kws)
     # stitched = warp_images(data)

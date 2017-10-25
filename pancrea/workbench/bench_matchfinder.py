@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   20-10-2017 10:39:06
 @Last Modified by:   rlane
-@Last Modified time: 25-10-2017 17:39:31
+@Last Modified time: 25-10-2017 18:17:05
 """
 
 import os
@@ -72,13 +72,13 @@ def benchtest_matchfinder_ransac(img1, img2):
     """
     """
     ORB_arg_dict = {
-        'downscale': [2],
-        'n_keypoints': [2000, 1000],
+        'downscale': [2, 2.5],
+        'n_keypoints': [2000],
         'fast_threshold': 0.05}
 
     ransac_arg_dict = {
-        'min_samples': [2, 5],
-        'residual_threshold': [2, 1, 0.5],
+        'min_samples': [5],
+        'residual_threshold': [10, 20],
         'max_trials': [5000]}
 
     # Get Cartesian product of parameter space
@@ -188,15 +188,15 @@ if __name__ == '__main__':
     shape = get_shape(data)
 
     # Select random image pair
-    # img_pairs = []
-    # for row in keys:
-    #     img_pairs.append(list(zip(row, row[1:])))
-    # img_pairs = np.array(img_pairs).reshape(shape[0] * (shape[1] - 1), 2)
-    # rand_img_pair = img_pairs[np.random.randint(len(img_pairs))]
+    img_pairs = []
+    for row in keys:
+        img_pairs.append(list(zip(row, row[1:])))
+    img_pairs = np.array(img_pairs).reshape(shape[0] * (shape[1] - 1), 2)
+    rand_img_pair = img_pairs[np.random.randint(len(img_pairs))]
 
     # Run bench test
-    df_out = benchtest_matchfinder_ransac(FM_imgs[keys[0, 0]],
-                                          FM_imgs[keys[0, 1]])
+    df_out = benchtest_matchfinder_ransac(FM_imgs[keys[2, 0]],
+                                          FM_imgs[keys[2, 1]])
 
     # Save results to log file
     logfile = 'pancrea//workbench//log_matchfinder.log'
