@@ -2,9 +2,10 @@
 # @Author: Ryan Lane
 # @Date:   2017-10-22 11:33:08
 # @Last Modified by:   rlane
-# @Last Modified time: 23-10-2017 15:57:59
+# @Last Modified time: 25-10-2017 12:26:12
 
 import os
+from glob import glob
 import numpy as np
 import pandas as pd
 import time
@@ -39,8 +40,8 @@ def benchtest_transform(img1, img2):
     """
     # Parameters for ORB
     ORB_arg_dict = {
-        'downscale': [1.5, 2, 2.25, 2.5, 2.75, 3],
-        'n_keypoints': [600, 800, 1000],
+        'downscale': [2, 2.5],
+        'n_keypoints': [800, 1000],
         'fast_threshold': 0.05
     }
 
@@ -48,7 +49,7 @@ def benchtest_transform(img1, img2):
     ransac_arg_dict = {
         'min_samples': [4],
         'residual_threshold': 1,
-        'max_trials': [600, 800, 1000]
+        'max_trials': [1000]
     }
 
     # Get all possible combinations of parameter space
@@ -94,8 +95,9 @@ def benchtest_transform(img1, img2):
 if __name__ == '__main__':
 
     # Load data
-    dir_name = 'sample_data//rat-pancreas'
-    data = load_data(dir_name=dir_name)
+    filenames = glob(
+        '../SECOM/*/orange_1200x900_overlap-50/dmonds*_[012]x*[012]y*')
+    data = load_data(filenames=filenames)
     FM_imgs, EM_imgs, x_positions, y_positions = data
     keys = get_keys(data)
     shape = get_shape(data)
@@ -105,11 +107,11 @@ if __name__ == '__main__':
     for row in keys:
         img_pairs.append(list(zip(row, row[1:])))
     img_pairs = np.array(img_pairs).reshape(shape[0] * (shape[1] - 1), 2)
-    rand_img_pair = img_pairs[np.random.randint(12)]
+    rand_img_pair = img_pairs[np.random.randint(len(img_pairs))]
 
     # Run bench test
-    df_out = benchtest_transform(FM_imgs[rand_img_pair[0]],
-                                 FM_imgs[rand_img_pair[1]])
+    df_out = benchtest_transform(FM_imgs[keys[0, 1]],
+                                 FM_imgs[keys[0, 2]])
 
     # Save results to log file
     logfile = 'pancrea//workbench//log_transform.log'

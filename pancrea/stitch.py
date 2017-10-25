@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 23-10-2017 16:44:16
+@Last Modified time: 25-10-2017 14:48:12
 """
 
 import os
@@ -58,6 +58,12 @@ def detect_features(img, ORB_kws=None):
     """
     Detect features using ORB
     Wrapper for `skimage.feature.ORB`
+
+    Parameters
+    ----------
+
+    Returns
+    -------
     """
     ORB_kws = {} if ORB_kws is None else ORB_kws
     default_ORB_kws = {
@@ -80,6 +86,12 @@ def find_matches(img1, img2, ORB_kws=None):
     """
     Find matches between images
     Wrapper for `skimage.feature.match_descriptors`
+
+    Parameters
+    ----------
+
+    Returns
+    -------
     """
     kps_img1, dps_img1 = detect_features(img1, ORB_kws=ORB_kws)
     kps_img2, dps_img2 = detect_features(img2, ORB_kws=ORB_kws)
@@ -92,6 +104,12 @@ def estimate_transform(img1, img2, ORB_kws=None, ransac_kws=None):
     """
     Estimate Affine transformation between two images
     Wrapper for `skimage.measure.ransac` assuming AffineTransform
+
+    Parameters
+    ----------
+
+    Returns
+    -------
     """
     kps_img1, kps_img2, matches = find_matches(img1, img2, ORB_kws=ORB_kws)
     src = kps_img2[matches[:, 1]][:, ::-1]
@@ -106,6 +124,7 @@ def estimate_transform(img1, img2, ORB_kws=None, ransac_kws=None):
     ransac_kws = {**default_ransac_kws, **ransac_kws}
 
     model, inliers = ransac((src, dst), AffineTransform, **ransac_kws)
+
     return model
 
 
@@ -141,6 +160,12 @@ def estimate_translation(img1, img2, FFT_kws=None):
 def get_translations(data, method='robust', FFT_kws=None,
                      ORB_kws=None, ransac_kws=None):
     """
+
+    Parameters
+    ----------
+
+    Returns
+    -------
     """
     FM_imgs, EM_imgs, x_positions, y_positions = data
     keys = get_keys(data)
@@ -185,7 +210,7 @@ def get_translations(data, method='robust', FFT_kws=None,
     cum_v_shifts = np.cumsum(v_shifts, axis=1)
 
     translations = cum_h_shifts + np.swapaxes(cum_v_shifts, 0, 1)
-    translations = translations.reshape(shape[-1]*2, 2)
+    translations = translations.reshape(np.product(shape), 2)
     translations[:, 1] = translations[:, 1] - translations[:, 1].min()
     translations = translations.astype(np.int64)
 
@@ -250,7 +275,7 @@ def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
 
     # Place these in output array
     costs_arr[:, cslice] = costs_upper * (labels == 0)
-    costs_arr[:, cslice] +=  costs_lower * (labels == 2)
+    costs_arr[:, cslice] += costs_lower * (labels == 2)
 
     # Finally, place the difference image
     costs_arr[mask] = diff_image[mask]
@@ -260,17 +285,21 @@ def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
 
 def warp_images(data):
     """
+
+    Parameters
+    ----------
+
+    Returns
+    -------
     """
-    # translations, transforms = get_translations_robust(data)
     keys = get_keys(data)
     shape = get_shape(data)
 
-    translations = get_translations_robust(data)
+    translations = get_translations(data)
 
     transforms = {}
     for k, t in zip(keys.flatten(), translations):
         transforms[k] = AffineTransform(translation=t)
-
 
     H_px, W_px = FM_imgs[keys.flatten()[0]].shape
 
@@ -368,8 +397,33 @@ def warp_images(data):
     return stitched
 
 
+def preview(data):
+    """
+    """
+    FM_imgs, EM_imgs, x_positions, y_positions = data
+    keys = get_keys(data)
+    shape = get_shape(data)
+
+    fig, axes = plt.subplots(*shape)
+
+    for k_row, ax_row in zip(keys, axes):
+        for k, ax in zip(k_row, ax_row):
+
+            ax.imshow(FM_imgs[k])
+            ax.axis('off')
+
+    fig.subplots_adjust(wspace=0.05, hspace=0.05)
+
+
 def tile_images(data):
     """
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+
     Notes
     -----
     Will have to separate FM and EM images
@@ -389,16 +443,17 @@ def tile_images(data):
     # return stitched_norm
 
 
-
 if __name__ == '__main__':
-    dir_name = 'rat-pancreas'
+    # dir_name = 'rat-pancreas'
     # dir_name = 'nano-diamonds'
-    filenames = ['rat-pancreas//tile_4-2.h5',
-                 'rat-pancreas//tile_4-3.h5',
-                 'rat-pancreas//tile_4-4.h5',
-                 'rat-pancreas//tile_5-2.h5',
-                 'rat-pancreas//tile_5-3.h5',
-                 'rat-pancreas//tile_5-4.h5']
+    # filenames = ['rat-pancreas//tile_4-2.h5',
+    #              'rat-pancreas//tile_4-3.h5',
+    #              'rat-pancreas//tile_4-4.h5',
+    #              'rat-pancreas//tile_5-2.h5',
+    #              'rat-pancreas//tile_5-3.h5',
+    #              'rat-pancreas//tile_5-4.h5']
+    filenames = glob(
+        '../SECOM/*/orange_1200x900_overlap-50/dmonds*_[012]x*[012]y*')
 
     data = load_data(filenames=filenames)
     FM_imgs, EM_imgs, x_positions, y_positions = data
@@ -410,4 +465,5 @@ if __name__ == '__main__':
     # fig, ax = plt.subplots()
     # ax.imshow(stitched)
 
-    stitched = warp_images(data)
+    cum_h_shifts, cum_v_shifts = get_translations(data)
+    # stitched = warp_images(data)
