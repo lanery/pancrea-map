@@ -2,7 +2,7 @@
 # @Author: Ryan Lane
 # @Date:   2017-10-22 11:33:08
 # @Last Modified by:   rlane
-# @Last Modified time: 25-10-2017 12:26:12
+# @Last Modified time: 25-10-2017 17:25:25
 
 import os
 from glob import glob
@@ -42,17 +42,15 @@ def benchtest_transform(img1, img2):
     ORB_arg_dict = {
         'downscale': [2, 2.5],
         'n_keypoints': [800, 1000],
-        'fast_threshold': 0.05
-    }
+        'fast_threshold': 0.05}
 
     # Parameters for RANSAC
     ransac_arg_dict = {
         'min_samples': [4],
         'residual_threshold': 1,
-        'max_trials': [1000]
-    }
+        'max_trials': [1000]}
 
-    # Get all possible combinations of parameter space
+    # Get Cartesian product of parameter space
     ORB_kws_list = dict_product(ORB_arg_dict)
     ransac_kws_list = dict_product(ransac_arg_dict)
 
@@ -80,8 +78,7 @@ def benchtest_transform(img1, img2):
             results = {
                 'dX': dX,
                 'dY': dY,
-                't': (end - start)
-            }
+                't': (end - start)}
 
             df_out = df_out.append({**params, **results}, ignore_index=True)
 
