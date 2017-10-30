@@ -3,15 +3,15 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 25-10-2017 18:31:18
+@Last Modified time: 27-10-2017 16:17:44
 """
 
 import os
 from glob import glob
 import numpy as np
-from skimage.external import tifffile
 import matplotlib.pyplot as plt
 import h5py
+from tqdm import tqdm
 
 from skimage.feature import ORB, match_descriptors
 from skimage.feature import register_translation
@@ -68,9 +68,9 @@ def detect_features(img, ORB_kws=None):
     ORB_kws = {} if ORB_kws is None else ORB_kws
     default_ORB_kws = {
         'downscale': 2,
-        'n_keypoints': 1000,
-        'fast_threshold': 0.05
-    }
+        'n_keypoints': 2000,
+        'fast_threshold': 0.05}
+
     ORB_kws = {**default_ORB_kws, **ORB_kws}
 
     orb = ORB(**ORB_kws)
@@ -82,7 +82,7 @@ def detect_features(img, ORB_kws=None):
     return kps, dps
 
 
-def find_matches(img1, img2, ORB_kws=None):
+def find_matches(img1, img2, crop_kws=None, ORB_kws=None):
     """
     Find matches between images
     Wrapper for `skimage.feature.match_descriptors`
@@ -93,14 +93,44 @@ def find_matches(img1, img2, ORB_kws=None):
     Returns
     -------
     """
-    kps_img1, dps_img1 = detect_features(img1, ORB_kws=ORB_kws)
-    kps_img2, dps_img2 = detect_features(img2, ORB_kws=ORB_kws)
+    if crop_kws is None:
+        kps_img1, dps_img1 = detect_features(img1, ORB_kws=ORB_kws)
+        kps_img2, dps_img2 = detect_features(img2, ORB_kws=ORB_kws)
+
+    else:
+        try:
+            m, n = img1.shape
+            o1 = 1 / (1 - (crop_kws['overlap'] / 100))
+            o2 = 1 / (crop_kws['overlap'] / 100)
+
+            if crop_kws['direction'] == 'horizontal':
+                img1 = img1[:, int(n/o1):]
+                img2 = img2[:, :int(n/o2)]
+
+                kps_img1, dps_img1 = detect_features(img1, ORB_kws=ORB_kws)
+                kps_img2, dps_img2 = detect_features(img2, ORB_kws=ORB_kws)
+
+                kps_img1[:, 1] += int(n / o1)
+
+            else:  # assume images are stacked vertically
+                img1 = img1[int(m/o1):, :]
+                img2 = img2[:int(m/o2), :]
+
+                kps_img1, dps_img1 = detect_features(img1, ORB_kws=ORB_kws)
+                kps_img2, dps_img2 = detect_features(img2, ORB_kws=ORB_kws)
+
+                kps_img1[:, 0] += int(m / o1)
+
+        except KeyError as exc:
+            msg = "`crop_kws` must contain {}.".format(exc)
+            raise KeyError(msg)
 
     matches = match_descriptors(dps_img1, dps_img2, cross_check=True)
     return kps_img1, kps_img2, matches
 
 
-def estimate_transform(img1, img2, ORB_kws=None, ransac_kws=None):
+def estimate_transform(img1, img2, crop_kws=None,
+                       ORB_kws=None, ransac_kws=None):
     """
     Estimate Affine transformation between two images
     Wrapper for `skimage.measure.ransac` assuming AffineTransform
@@ -111,20 +141,21 @@ def estimate_transform(img1, img2, ORB_kws=None, ransac_kws=None):
     Returns
     -------
     """
-    kps_img1, kps_img2, matches = find_matches(img1, img2, ORB_kws=ORB_kws)
+    kps_img1, kps_img2, matches = find_matches(
+        img1, img2, crop_kws=crop_kws, ORB_kws=ORB_kws)
+
     src = kps_img2[matches[:, 1]][:, ::-1]
     dst = kps_img1[matches[:, 0]][:, ::-1]
 
     ransac_kws = {} if ransac_kws is None else ransac_kws
     default_ransac_kws = {
-        'min_samples': 4,
-        'residual_threshold': 1,
-        'max_trials': 800
-    }
+        'min_samples': 5,
+        'residual_threshold': 10,
+        'max_trials': 5000}
+
     ransac_kws = {**default_ransac_kws, **ransac_kws}
 
     model, inliers = ransac((src, dst), AffineTransform, **ransac_kws)
-
     return model
 
 
@@ -157,7 +188,7 @@ def estimate_translation(img1, img2, FFT_kws=None):
     return shifts
     
 
-def get_translations(data, method='robust', FFT_kws=None,
+def get_translations(data, method='robust', crop_kws=None, FFT_kws=None,
                      ORB_kws=None, ransac_kws=None):
     """
 
@@ -171,32 +202,42 @@ def get_translations(data, method='robust', FFT_kws=None,
     keys = get_keys(data)
     shape = get_shape(data)
 
+    if crop_kws is not None:
+        crop_kws['direction'] = 'horizontal'
+
     h_shifts = []
-    for row in keys:
+    for row in tqdm(keys):
         h_shifts.append(np.zeros(2))
-        for k1, k2 in zip(row, row[1:]):
+        for k1, k2 in tqdm(zip(row, row[1:])):
 
             if method == 'robust':
                 model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
+                                           crop_kws=crop_kws,
                                            ORB_kws=ORB_kws,
                                            ransac_kws=ransac_kws)
                 shift = model.translation
+                print(shift)
             else:
                 shift = estimate_translation(FM_imgs[k1], FM_imgs[k2],
                                              FFT_kws=FFT_kws)
 
             h_shifts.append(shift)
 
+    if crop_kws is not None:
+        crop_kws['direction'] = 'vertical'
+
     v_shifts = []
-    for col in keys.T:
+    for col in tqdm(keys.T):
         v_shifts.append(np.zeros(2))
-        for k1, k2 in zip(col, col[1:]):
+        for k1, k2 in tqdm(zip(col, col[1:])):
 
             if method == 'robust':
                 model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
+                                           crop_kws=crop_kws,
                                            ORB_kws=ORB_kws,
                                            ransac_kws=ransac_kws)
                 shift = model.translation
+                print(shift)
             else:
                 shift = estimate_translation(FM_imgs[k1], FM_imgs[k2],
                                              FFT_kws=FFT_kws)
@@ -374,28 +415,7 @@ def warp_images(data, translations):
             v_mcp_masks.append(mcp_mask)
 
 
-    h_mcp_masks = np.array(h_mcp_masks).reshape(2, 2, 3438, 5264)
-    v_mcp_masks = np.array(v_mcp_masks)
-    mcp_masks = {}
-
-    for i, row in enumerate(keys):
-        cum_mask = h_mcp_masks[i].sum(axis=0)
-
-        for j, k in enumerate(row):
-
-            h_mcp_mask = np.where(cum_mask == Nx - (j + 1), 1, 0)
-            v_mcp_mask = np.where(v_mcp_masks[j] == Ny - (i + 1), 1, 0)
-            mcp_mask = np.sum((h_mcp_mask, v_mcp_mask), axis=0)
-            mcp_masks[k] = np.where(mcp_mask == mcp_mask.max(), 1, 0)
-
-    stitched = []
-    for k in keys.flatten():
-        patch = np.where(mcp_masks[k], warpeds[k], 0)
-        stitched.append(patch)
-
-    stitched = np.sum(stitched, axis=0)
-
-    return stitched
+    return warpeds, np.array(h_mcp_masks), np.array(v_mcp_masks)
 
 
 def preview(data):
@@ -416,7 +436,7 @@ def preview(data):
     fig.subplots_adjust(wspace=0.05, hspace=0.05)
 
 
-def tile_images(data):
+def tile_images(data, translations):
     """
 
     Parameters
@@ -443,6 +463,34 @@ def tile_images(data):
 
     # return stitched_norm
 
+    warpeds, h_mcp_masks, v_mcp_masks = warp_images(data, translations)
+
+    Nx, Ny = shape[::-1]
+
+    h_mcp_masks = np.array(h_mcp_masks).reshape(2, 2, 1, 1)
+    v_mcp_masks = np.array(v_mcp_masks)
+    mcp_masks = {}
+
+    for i, row in enumerate(keys):
+        cum_mask = h_mcp_masks[i].sum(axis=0)
+
+        for j, k in enumerate(row):
+
+            h_mcp_mask = np.where(cum_mask == Nx - (j + 1), 1, 0)
+            v_mcp_mask = np.where(v_mcp_masks[j] == Ny - (i + 1), 1, 0)
+            mcp_mask = np.sum((h_mcp_mask, v_mcp_mask), axis=0)
+            mcp_masks[k] = np.where(mcp_mask == mcp_mask.max(), 1, 0)
+
+    stitched = []
+    for k in keys.flatten():
+        patch = np.where(mcp_masks[k], warpeds[k], 0)
+        stitched.append(patch)
+
+    stitched = np.sum(stitched, axis=0)
+
+    return stitched
+
+
 
 if __name__ == '__main__':
     # dir_name = 'rat-pancreas'
@@ -454,12 +502,16 @@ if __name__ == '__main__':
     #              'rat-pancreas//tile_5-3.h5',
     #              'rat-pancreas//tile_5-4.h5']
     filenames = glob(
-        '../SECOM/*/orange_1200x900_overlap-50/dmonds*_[012]x*[012]y*')
+        '../SECOM/*/orange_1200x900_overlap-50/dmonds*_[01]x*[01]y*')
 
     data = load_data(filenames=filenames)
     FM_imgs, EM_imgs, x_positions, y_positions = data
     keys = get_keys(data)
     shape = get_shape(data)
+
+    crop_kws = {
+        'overlap': 50
+    }
 
     ORB_kws = {
         'downscale': 2,
@@ -472,6 +524,8 @@ if __name__ == '__main__':
         'max_trials': 5000}
 
     translations = get_translations(data,
+                                    crop_kws=crop_kws,
                                     ORB_kws=ORB_kws,
                                     ransac_kws=ransac_kws)
-    # stitched = warp_images(data)
+
+    warpeds, h_mcp_masks, v_mcp_masks = warp_images(data, translations)

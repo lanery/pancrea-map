@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   20-10-2017 10:39:06
 @Last Modified by:   rlane
-@Last Modified time: 25-10-2017 18:17:05
+@Last Modified time: 27-10-2017 14:52:57
 """
 
 import os
@@ -26,12 +26,12 @@ from ..odemis_data import load_data
 from ..stitch import get_keys, get_shape, find_matches
 
 
-def benchtest_matchfinder(img1, img2):
+def benchtest_matchfinder(img1, img2, crop_kws=None):
     """
     """
     ORB_arg_dict = {
-        'downscale': [2, 2.5],
-        'n_keypoints': [600, 800, 1000],
+        'downscale': [2],
+        'n_keypoints': [2000],
         'fast_threshold': 0.05}
 
     # Get all possible combinations of parameter space
@@ -45,7 +45,9 @@ def benchtest_matchfinder(img1, img2):
 
         # Find matches and record time
         start = time.clock()
-        kps1, kps2, matches = find_matches(img1, img2, ORB_kws=ORB_kws)
+        kps1, kps2, matches = find_matches(img1, img2,
+                                           crop_kws=crop_kws,
+                                           ORB_kws=ORB_kws)
         end = time.clock()
         results = {
             'N_matches': len(matches),
@@ -68,17 +70,17 @@ def benchtest_matchfinder(img1, img2):
     return df_out
 
 
-def benchtest_matchfinder_ransac(img1, img2):
+def benchtest_matchfinder_ransac(img1, img2, crop_kws=None):
     """
     """
     ORB_arg_dict = {
-        'downscale': [2, 2.5],
+        'downscale': [2],
         'n_keypoints': [2000],
         'fast_threshold': 0.05}
 
     ransac_arg_dict = {
         'min_samples': [5],
-        'residual_threshold': [10, 20],
+        'residual_threshold': [10],
         'max_trials': [5000]}
 
     # Get Cartesian product of parameter space
@@ -97,18 +99,24 @@ def benchtest_matchfinder_ransac(img1, img2):
             params = {**ORB_kws, **ransac_kws}
 
             start = time.clock()
-            kps1, kps2, matches = find_matches(img1, img2, ORB_kws=ORB_kws)
-
+            kps1, kps2, matches = find_matches(img1, img2,
+                                               crop_kws=crop_kws,
+                                               ORB_kws=ORB_kws)
             src = kps2[matches[:, 1]][:, ::-1]
             dst = kps1[matches[:, 0]][:, ::-1]
 
             try:
-                _, inliers = ransac((src, dst), AffineTransform, **ransac_kws)
+                model, inliers = ransac(
+                    (src, dst), AffineTransform, **ransac_kws)
+
             except np.linalg.LinAlgError:
+                model = AffineTransform(translation=np.array([0, 0]))
                 inliers = np.zeros(len(matches), dtype=bool)
 
             end = time.clock()
             results = {
+                'dX': model.translation[0],
+                'dY': model.translation[1],
                 'N_matches': inliers.sum(),
                 'time': end - start}
 
@@ -143,10 +151,13 @@ def save_plot(N_matches, time, ORB_kws=None, ransac_kws=None):
     N keypoints......{n_keypoints}
     Fast Threshold...{fast_threshold}""").format(**ORB_kws)
 
-    ransac_text = """\
-    Min Samples......{min_samples}
-    Res. Threshold...{residual_threshold}
-    Max Trials.......{max_trials}""".format(**ransac_kws)
+    if ransac_kws is None:
+        ransac_text = ""
+    else:
+        ransac_text = """\
+        Min Samples......{min_samples}
+        Res. Threshold...{residual_threshold}
+        Max Trials.......{max_trials}""".format(**ransac_kws)
 
     # Add text to plot
     ax = plt.gca()
@@ -194,9 +205,21 @@ if __name__ == '__main__':
     img_pairs = np.array(img_pairs).reshape(shape[0] * (shape[1] - 1), 2)
     rand_img_pair = img_pairs[np.random.randint(len(img_pairs))]
 
+    crop_kws = {'overlap': 50,
+                'direction': 'vertical'}
+
     # Run bench test
-    df_out = benchtest_matchfinder_ransac(FM_imgs[keys[2, 0]],
-                                          FM_imgs[keys[2, 1]])
+    df_out = pd.DataFrame()
+    for key_row in keys.T:
+        for k1, k2 in zip(key_row, key_row[1:]):
+            df_out = df_out.append(
+                benchtest_matchfinder_ransac(FM_imgs[k1],
+                                             FM_imgs[k2],
+                                             crop_kws=crop_kws),
+                ignore_index=True)
+    # df_out = benchtest_matchfinder_ransac(FM_imgs[keys[0, 1]],
+    #                                       FM_imgs[keys[1, 1]],
+    #                                       crop_kws=None)
 
     # Save results to log file
     logfile = 'pancrea//workbench//log_matchfinder.log'
