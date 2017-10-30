@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 27-10-2017 16:17:44
+@Last Modified time: 30-10-2017 16:43:26
 """
 
 import os
@@ -363,10 +363,17 @@ def warp_images(data, translations):
         warpeds[k] = warped
         masks[k] = mask
 
+    return warpeds, masks
+
+
+def get_puzzle_pieces(keys, shape, warpeds, masks):
+    """
+    """
 
     h_mcp_masks = []
     v_mcp_masks = []
 
+    output_shape = np.array(list(warpeds.values())[0].shape)
     xmax, ymax = output_shape - 1
     Nx, Ny = shape[::-1]
 
@@ -387,7 +394,6 @@ def warp_images(data, translations):
 
             mcp_mask = np.zeros(output_shape, dtype=np.uint8)
             mcp_mask[mcp[:, 0], mcp[:, 1]] = 1
-
             mcp_mask = (label(mcp_mask, connectivity=1, background=-1) == 1)
 
             h_mcp_masks.append(mcp_mask)
@@ -397,8 +403,8 @@ def warp_images(data, translations):
 
             costs = generate_costs(np.abs(warpeds[k2] - warpeds[k1]),
                                    masks[k2] & masks[k1])
-            costs[0, :] = 0
-            costs[-1, :] = 0
+            costs[:, 0] = 0
+            costs[:, -1] = 0
 
             mask_pts = [[xmax * (i+1) // Ny, 0],
                         [xmax * (i+1) // Ny, ymax]]
@@ -409,13 +415,28 @@ def warp_images(data, translations):
 
             mcp_mask = np.zeros(output_shape, dtype=np.uint8)
             mcp_mask[mcp[:, 0], mcp[:, 1]] = 1
-
             mcp_mask = (label(mcp_mask, connectivity=1, background=-1) == 1)
 
             v_mcp_masks.append(mcp_mask)
 
+    Nx, Ny = shape[::-1]
+    unstacked_shape = (Nx - 1, Ny, *h_mcp_masks.shape[-2:])
 
-    return warpeds, np.array(h_mcp_masks), np.array(v_mcp_masks)
+    h_mcp_masks = np.array(h_mcp_masks).reshape(unstacked_shape)
+    v_mcp_masks = np.array(v_mcp_masks)
+    mcp_masks = {}
+
+    for i, row in enumerate(keys):
+        cum_mask = h_mcp_masks[i].sum(axis=0)
+
+        for j, k in enumerate(row):
+
+            h_mcp_mask = np.where(cum_mask == Nx - (j + 1), 1, 0)
+            v_mcp_mask = np.where(v_mcp_masks[j] == Ny - (i + 1), 1, 0)
+            mcp_mask = np.sum((h_mcp_mask, v_mcp_mask), axis=0)
+            mcp_masks[k] = np.where(mcp_mask == mcp_mask.max(), 1, 0)
+
+    return mcp_masks
 
 
 def preview(data):
@@ -436,6 +457,21 @@ def preview(data):
     fig.subplots_adjust(wspace=0.05, hspace=0.05)
 
 
+def crude_tile(warpeds, masks):
+    """
+    """
+
+    warpeds_stitched = np.sum(list(warpeds.values()), axis=0)
+    masks_stitched = np.sum(list(masks.values()), axis=0)
+
+    stitched_norm = np.true_divide(warpeds_stitched, masks_stitched,
+                                   out=np.zeros_like(warpeds_stitched),
+                                   where=(masks_stitched != 0))
+
+    return stitched_norm
+
+
+
 def tile_images(data, translations):
     """
 
@@ -453,33 +489,9 @@ def tile_images(data, translations):
     keys = get_keys(data)
     shape = get_shape(data)
 
+    warpeds, masks = warp_images(data, translations)
 
-    # warpeds_stitched = np.sum(list(warpeds.values()), axis=0)
-    # masks_stitched = np.sum(list(masks.values()), axis=0)
-
-    # stitched_norm = np.true_divide(warpeds_stitched, masks_stitched,
-    #                                out=np.zeros_like(warpeds_stitched),
-    #                                where=(masks_stitched != 0))
-
-    # return stitched_norm
-
-    warpeds, h_mcp_masks, v_mcp_masks = warp_images(data, translations)
-
-    Nx, Ny = shape[::-1]
-
-    h_mcp_masks = np.array(h_mcp_masks).reshape(2, 2, 1, 1)
-    v_mcp_masks = np.array(v_mcp_masks)
-    mcp_masks = {}
-
-    for i, row in enumerate(keys):
-        cum_mask = h_mcp_masks[i].sum(axis=0)
-
-        for j, k in enumerate(row):
-
-            h_mcp_mask = np.where(cum_mask == Nx - (j + 1), 1, 0)
-            v_mcp_mask = np.where(v_mcp_masks[j] == Ny - (i + 1), 1, 0)
-            mcp_mask = np.sum((h_mcp_mask, v_mcp_mask), axis=0)
-            mcp_masks[k] = np.where(mcp_mask == mcp_mask.max(), 1, 0)
+    mcp_masks = get_puzzle_pieces(keys, shape, warpeds, masks)
 
     stitched = []
     for k in keys.flatten():
@@ -502,7 +514,7 @@ if __name__ == '__main__':
     #              'rat-pancreas//tile_5-3.h5',
     #              'rat-pancreas//tile_5-4.h5']
     filenames = glob(
-        '../SECOM/*/orange_1200x900_overlap-50/dmonds*_[01]x*[01]y*')
+        '../SECOM/*/orange_1200x900_overlap-50/dmonds*_[01]x*[012]y*')
 
     data = load_data(filenames=filenames)
     FM_imgs, EM_imgs, x_positions, y_positions = data
@@ -528,4 +540,6 @@ if __name__ == '__main__':
                                     ORB_kws=ORB_kws,
                                     ransac_kws=ransac_kws)
 
-    warpeds, h_mcp_masks, v_mcp_masks = warp_images(data, translations)
+    # stitched = tile_images(data, translations)
+
+    # warpeds, h_mcp_masks, v_mcp_masks = warp_images(data, translations)
