@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 30-10-2017 16:43:26
+@Last Modified time: 31-10-2017 11:16:59
 """
 
 import os
@@ -206,9 +206,9 @@ def get_translations(data, method='robust', crop_kws=None, FFT_kws=None,
         crop_kws['direction'] = 'horizontal'
 
     h_shifts = []
-    for row in tqdm(keys):
+    for row in tqdm(keys, ascii=True):
         h_shifts.append(np.zeros(2))
-        for k1, k2 in tqdm(zip(row, row[1:])):
+        for k1, k2 in tqdm(zip(row, row[1:]), ascii=True):
 
             if method == 'robust':
                 model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
@@ -227,9 +227,9 @@ def get_translations(data, method='robust', crop_kws=None, FFT_kws=None,
         crop_kws['direction'] = 'vertical'
 
     v_shifts = []
-    for col in tqdm(keys.T):
+    for col in tqdm(keys.T, ascii=True):
         v_shifts.append(np.zeros(2))
-        for k1, k2 in tqdm(zip(col, col[1:])):
+        for k1, k2 in tqdm(zip(col, col[1:]), ascii=True):
 
             if method == 'robust':
                 model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
@@ -386,7 +386,7 @@ def get_puzzle_pieces(keys, shape, warpeds, masks):
             costs[-1, :] = 0
 
             mask_pts = [[0, ymax * (i+1) // Nx],
-                        [xmax, ymax * (i+1) // Nx]]
+                        [xmax, ymax * (i+1) // Nx + 1]]
 
             mcp, _ = route_through_array(costs, mask_pts[0], mask_pts[1],
                                          fully_connected=True)
@@ -419,11 +419,11 @@ def get_puzzle_pieces(keys, shape, warpeds, masks):
 
             v_mcp_masks.append(mcp_mask)
 
-    Nx, Ny = shape[::-1]
-    unstacked_shape = (Nx - 1, Ny, *h_mcp_masks.shape[-2:])
-
-    h_mcp_masks = np.array(h_mcp_masks).reshape(unstacked_shape)
+    h_mcp_masks = np.array(h_mcp_masks)
     v_mcp_masks = np.array(v_mcp_masks)
+
+    Nx, Ny = shape[::-1]
+    h_mcp_masks = h_mcp_masks.reshape(Nx - 1, Ny, *h_mcp_masks.shape[-2:])
     mcp_masks = {}
 
     for i, row in enumerate(keys):
@@ -437,6 +437,24 @@ def get_puzzle_pieces(keys, shape, warpeds, masks):
             mcp_masks[k] = np.where(mcp_mask == mcp_mask.max(), 1, 0)
 
     return mcp_masks
+
+
+def get_costs(warpeds, masks):
+    """
+    """
+    output_shape = np.array(list(warpeds.values())[0].shape)
+    xmax, ymax = output_shape - 1
+    Nx, Ny = shape[::-1]
+
+    h_costs = []
+    v_costs = []
+
+    for col in keys.T:
+        for i, (k1, k2) in enumerate(zip(col, col[1:])):
+
+            costs = generate_costs(np.abs(warpeds[k2] - warpeds[k1]),
+                                   masks[k2] & masks[k1])
+            h_costs.append(costs)
 
 
 def preview(data):
@@ -460,6 +478,8 @@ def preview(data):
 def crude_tile(warpeds, masks):
     """
     """
+
+    # warpeds, masks = warp_images(data, translations)
 
     warpeds_stitched = np.sum(list(warpeds.values()), axis=0)
     masks_stitched = np.sum(list(masks.values()), axis=0)
@@ -514,7 +534,7 @@ if __name__ == '__main__':
     #              'rat-pancreas//tile_5-3.h5',
     #              'rat-pancreas//tile_5-4.h5']
     filenames = glob(
-        '../SECOM/*/orange_1200x900_overlap-50/dmonds*_[01]x*[012]y*')
+        '../SECOM/*/orange_1200x900_overlap-30/dmonds*_[01]x*[012]y*')
 
     data = load_data(filenames=filenames)
     FM_imgs, EM_imgs, x_positions, y_positions = data
@@ -522,7 +542,7 @@ if __name__ == '__main__':
     shape = get_shape(data)
 
     crop_kws = {
-        'overlap': 50
+        'overlap': 30
     }
 
     ORB_kws = {
