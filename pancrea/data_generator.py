@@ -3,10 +3,11 @@
 @Author: rlane
 @Date:   01-11-2017 11:50:27
 @Last Modified by:   rlane
-@Last Modified time: 01-11-2017 17:35:52
+@Last Modified time: 01-11-2017 18:33:46
 """
 
 import os
+import re
 from glob import glob
 import numpy as np
 import h5py
@@ -71,7 +72,7 @@ class OdemisMosaicData(object):
         n_cols = np.unique(np.round(xs, decimals=precision)).size
         n_rows = np.unique(np.round(ys, decimals=precision)).size
 
-        self.shape = (n_rows, n_cols)
+        self.shape = (n_cols, n_rows)
         return self.shape
 
     def _get_sorted_keys(self):
@@ -81,7 +82,7 @@ class OdemisMosaicData(object):
 
         df = pd.DataFrame([self.x_positions, self.y_positions]).T
         df = df.sort_values([1, 0], ascending=[False, True])
-        self.sorted_keys = df.index.values.reshape(self.shape)
+        self.sorted_keys = df.index.values.reshape(self.shape[::-1])
         return self.sorted_keys
 
     def _get_file_format(self):
@@ -201,30 +202,19 @@ class GenericMosaicData(object):
         if filenames is None:
             self.fns = self._get_filenames()
         else:
-            self.fns = filenames
+            self.fns = sorted(filenames)
 
         self.ftype = self._get_file_format()
-        # self.keys = self._get_keys()
-        # self.shape = self._get_shape()
-        # self.sorted_keys = self._get_sorted_keys()
-        # self.imgs = self._load_imgs()
+        self.keys = self._get_keys()
+        self.shape = self._get_shape()
+        self.sorted_keys = self._get_sorted_keys()
+        self.imgs = self._load_imgs()
 
     def _get_filenames(self):
         """
         """
-        self.fns = (sorted(glob(self.relpath + '/*ome.tiff')) +
-                    sorted(glob(self.relpath + '/*.h5')))
+        self.fns = sorted(glob(self.relpath))
         return self.fns
-
-    def _get_keys(self):
-        """
-        """
-        keys = []
-        for fn in self.fns:
-            base_fn = os.path.basename(fn)
-            keys.append(base_fn.split('.')[0])
-        self.keys = keys
-        return self.keys
 
     def _get_file_format(self):
         """
@@ -242,8 +232,59 @@ class GenericMosaicData(object):
         self.ftype = exts[0]
         return self.ftype
 
+    def _get_keys(self):
+        """
+        """
+        keys = []
+        for fn in self.fns:
+            base_fn = os.path.basename(fn)
+            keys.append(base_fn.split('.')[0])
+        self.keys = keys
+        return self.keys
 
-def unstitch(img, shape=(2, 2), overlap=25):
+    def _get_shape(self):
+        """
+        """
+        try:
+            xs = []
+            ys = []
+            for key in self.keys:
+                x = re.findall('\d+x', key)[-1]
+                y = re.findall('\d+y', key)[-1]
+                xs.append(int(x[:-1]))
+                ys.append(int(y[:-1]))
+
+        except IndexError:
+            msg = ("Could not get shape of mosaic data. Check that " +
+                   "filenames are formatted e.g. `filename_3x_6y.tiff`.")
+            print(msg)
+
+        n_cols = len(set(xs))
+        n_rows = len(set(ys))
+
+        self.shape = (n_cols, n_rows)
+        return self.shape
+
+    def _get_sorted_keys(self):
+        """
+        """
+        self.sorted_keys = np.array(self.keys).reshape(self.shape).T
+        return self.sorted_keys
+
+    def _load_imgs(self):
+        """
+        """
+        self.imgs = {}
+
+        for fn in self.fns:
+            base_fn = os.path.basename(fn)
+            k = base_fn.split('.')[0]
+            self.imgs[k] = imread(fn)
+
+        return self.imgs
+
+
+def unstitch(img, shape=(4, 3), overlap=25):
     """
     Split up a composite image into overlapping sub-images
 
@@ -253,8 +294,7 @@ def unstitch(img, shape=(2, 2), overlap=25):
         Composite image for unstitching
 
     shape : tuple (optional)
-        Shape of unstitched image
-        (cols, rows)
+        Shape of unstitched image -> (cols, rows)
 
     overlap : scalar (optional)
         Percentage overlap between tiled sub-images
