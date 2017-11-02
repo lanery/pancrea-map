@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   01-11-2017 11:50:27
 @Last Modified by:   rlane
-@Last Modified time: 01-11-2017 18:33:46
+@Last Modified time: 02-11-2017 09:06:44
 """
 
 import os
@@ -308,7 +308,7 @@ def unstitch(img, shape=(4, 3), overlap=25):
     Notes
     -----
     For best results, img should have a rather high resolution
-    e.g. > 10 Mpx
+    e.g. >= 10 Mpx
     """
 
     Nx, Ny = shape

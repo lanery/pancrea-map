@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   10-10-2017 12:00:47
 @Last Modified by:   rlane
-@Last Modified time: 31-10-2017 11:16:59
+@Last Modified time: 02-11-2017 11:41:46
 """
 
 import os
@@ -82,7 +82,7 @@ def detect_features(img, ORB_kws=None):
     return kps, dps
 
 
-def find_matches(img1, img2, crop_kws=None, ORB_kws=None):
+def find_matches(img1, img2, match_kws=None, ORB_kws=None):
     """
     Find matches between images
     Wrapper for `skimage.feature.match_descriptors`
@@ -93,17 +93,17 @@ def find_matches(img1, img2, crop_kws=None, ORB_kws=None):
     Returns
     -------
     """
-    if crop_kws is None:
+    if match_kws is None:
         kps_img1, dps_img1 = detect_features(img1, ORB_kws=ORB_kws)
         kps_img2, dps_img2 = detect_features(img2, ORB_kws=ORB_kws)
 
     else:
         try:
             m, n = img1.shape
-            o1 = 1 / (1 - (crop_kws['overlap'] / 100))
-            o2 = 1 / (crop_kws['overlap'] / 100)
+            o1 = 1 / (1 - (match_kws['overlap'] / 100))
+            o2 = 1 / (match_kws['overlap'] / 100)
 
-            if crop_kws['direction'] == 'horizontal':
+            if match_kws['direction'] == 'horizontal':
                 img1 = img1[:, int(n/o1):]
                 img2 = img2[:, :int(n/o2)]
 
@@ -122,14 +122,14 @@ def find_matches(img1, img2, crop_kws=None, ORB_kws=None):
                 kps_img1[:, 0] += int(m / o1)
 
         except KeyError as exc:
-            msg = "`crop_kws` must contain {}.".format(exc)
+            msg = "`match_kws` must contain {}.".format(exc)
             raise KeyError(msg)
 
     matches = match_descriptors(dps_img1, dps_img2, cross_check=True)
     return kps_img1, kps_img2, matches
 
 
-def estimate_transform(img1, img2, crop_kws=None,
+def estimate_transform(img1, img2, match_kws=None,
                        ORB_kws=None, ransac_kws=None):
     """
     Estimate Affine transformation between two images
@@ -142,7 +142,7 @@ def estimate_transform(img1, img2, crop_kws=None,
     -------
     """
     kps_img1, kps_img2, matches = find_matches(
-        img1, img2, crop_kws=crop_kws, ORB_kws=ORB_kws)
+        img1, img2, match_kws=match_kws, ORB_kws=ORB_kws)
 
     src = kps_img2[matches[:, 1]][:, ::-1]
     dst = kps_img1[matches[:, 0]][:, ::-1]
@@ -186,9 +186,9 @@ def estimate_translation(img1, img2, FFT_kws=None):
         img1, img2, **FFT_kws)
 
     return shifts
-    
 
-def get_translations(data, method='robust', crop_kws=None, FFT_kws=None,
+
+def get_translations(data, method='robust', match_kws=None, FFT_kws=None,
                      ORB_kws=None, ransac_kws=None):
     """
 
@@ -202,8 +202,8 @@ def get_translations(data, method='robust', crop_kws=None, FFT_kws=None,
     keys = get_keys(data)
     shape = get_shape(data)
 
-    if crop_kws is not None:
-        crop_kws['direction'] = 'horizontal'
+    if match_kws is not None:
+        match_kws['direction'] = 'horizontal'
 
     h_shifts = []
     for row in tqdm(keys, ascii=True):
@@ -212,7 +212,7 @@ def get_translations(data, method='robust', crop_kws=None, FFT_kws=None,
 
             if method == 'robust':
                 model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
-                                           crop_kws=crop_kws,
+                                           match_kws=match_kws,
                                            ORB_kws=ORB_kws,
                                            ransac_kws=ransac_kws)
                 shift = model.translation
@@ -223,8 +223,8 @@ def get_translations(data, method='robust', crop_kws=None, FFT_kws=None,
 
             h_shifts.append(shift)
 
-    if crop_kws is not None:
-        crop_kws['direction'] = 'vertical'
+    if match_kws is not None:
+        match_kws['direction'] = 'vertical'
 
     v_shifts = []
     for col in tqdm(keys.T, ascii=True):
@@ -233,7 +233,7 @@ def get_translations(data, method='robust', crop_kws=None, FFT_kws=None,
 
             if method == 'robust':
                 model = estimate_transform(FM_imgs[k1], FM_imgs[k2],
-                                           crop_kws=crop_kws,
+                                           match_kws=match_kws,
                                            ORB_kws=ORB_kws,
                                            ransac_kws=ransac_kws)
                 shift = model.translation
@@ -541,7 +541,7 @@ if __name__ == '__main__':
     keys = get_keys(data)
     shape = get_shape(data)
 
-    crop_kws = {
+    match_kws = {
         'overlap': 30
     }
 
@@ -556,7 +556,7 @@ if __name__ == '__main__':
         'max_trials': 5000}
 
     translations = get_translations(data,
-                                    crop_kws=crop_kws,
+                                    match_kws=match_kws,
                                     ORB_kws=ORB_kws,
                                     ransac_kws=ransac_kws)
 
