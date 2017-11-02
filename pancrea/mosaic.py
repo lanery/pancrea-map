@@ -2,8 +2,8 @@
 """
 @Author: rlane
 @Date:   01-11-2017 11:42:39
-@Last Modified by:   rlane
-@Last Modified time: 02-11-2017 16:37:16
+@Last Modified by:   Ryan Lane
+@Last Modified time: 2017-11-02 23:21:35
 """
 
 import os
@@ -35,10 +35,10 @@ class Mosaic(object):
         self.Nx, self.Ny = self.shape
         self.nx, self.ny = self.imgs[self.keys[0]].shape[::-1]
 
-        # self.match_kws = 
-        # self.ORB_kws = 
-        # self.ransac_kws = 
-        # self.FFT_kws = 
+        # self.match_kws =
+        # self.ORB_kws =
+        # self.ransac_kws =
+        # self.FFT_kws =
 
     def get_translations(self, method='robust', match_kws=None,
                          ORB_kws=None, ransac_kws=None, FFT_kws=None):
@@ -108,13 +108,6 @@ class Mosaic(object):
     def get_transforms(self, transform=AffineTransform):
         """
         """
-        # self.translations = np.array([[[0,       0],
-        #                                [1122,    3],
-        #                                [2237,    6]],
-
-        #                               [[0,    1041],
-        #                                [1120, 1045],
-        #                                [2248, 1049]]])
 
         if not hasattr(self, 'translations'):
             match_kws = {'overlap': 25}
@@ -182,11 +175,11 @@ class Mosaic(object):
 
         self.h_costs = np.array(self.h_costs).reshape(
             self.Nx, self.Ny-1, self.mny, self.mnx)
-        self.h_costs = np.swapaxes(self.h_costs, 0, 1)
+        self.h_costs = self.h_costs.swapaxes(0, 1)
 
         self.v_costs = np.array(self.v_costs).reshape(
-            self.Nx-1, self.Ny, self.mny, self.mnx)
-        self.v_costs = np.swapaxes(self.v_costs, 0, 1)
+            self.Ny, self.Nx-1, self.mny, self.mnx)
+        self.v_costs = self.v_costs.swapaxes(0, 1)
 
         return self.h_costs, self.v_costs
 
@@ -262,7 +255,7 @@ class Mosaic(object):
             for k in krow:
                 self.patches[k] = np.where(
                     self.mcp_masks[k], self.warpeds[k], 0)
-                
+
         self.stitched = np.sum(list(self.patches.values()), axis=0)
         return self.stitched
 
@@ -420,7 +413,7 @@ def estimate_transform(img1, img2, match_kws=None,
     return model
 
 
-def estimate_translation(img1, img2, FFT_kws=None):
+def estimate_translation(img1, img2, match_kws=None, FFT_kws=None):
     """
     Estimate lateral translation between two images.
 
@@ -439,12 +432,37 @@ def estimate_translation(img1, img2, FFT_kws=None):
     FFT_kws = {} if FFT_kws is None else FFT_kws
     default_FFT_kws = {
         'upsample_factor': 1,
-        'space': 'real'
-    }
+        'space': 'real'}
+
     FFT_kws = {**default_FFT_kws, **FFT_kws}
 
-    shifts, error, phase_difference = register_translation(
-        img1, img2, **FFT_kws)
+    if match_kws is None:
+        shifts, error, phase_difference = register_translation(
+            img1, img2, **FFT_kws)
+
+    else:
+        try:
+            m, n = img1.shape
+            o1 = 1 / (1 - (match_kws['overlap'] / 100))
+            o2 = 1 / (match_kws['overlap'] / 100)
+
+            if match_kws['direction'] == 'horizontal':
+                img1 = img1[:, int(n/o1):]
+                img2 = img2[:, :int(n/o2)]
+
+                shifts, error, phase_difference = register_translation(
+                    img1, img2, **FFT_kws)
+
+            else:  # assume images are stacked vertically
+                img1 = img1[int(m/o1):, :]
+                img2 = img2[:int(m/o2), :]
+
+                shifts, error, phase_difference = register_translation(
+                    img1, img2, **FFT_kws)
+
+        except KeyError as exc:
+            msg = "`match_kws` must contain {}.".format(exc)
+            raise KeyError(msg)
 
     return shifts
 
@@ -517,9 +535,10 @@ def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
 
 if __name__ == '__main__':
 
-    fns = glob('sample_data/dartmouth_lungs/*[12]*[123]*.tiff')
+    fns = glob('sample_data/dartmouth_lungs/*[1234]*[1]*.tiff')
     gmd = GenericMosaicData(filenames=fns)
     mosaic = Mosaic(gmd)
     mosaic.plot_mosaic(stitch_lines=True)
+    print(mosaic.translations)
 
     plt.show()
