@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   01-11-2017 11:42:39
 @Last Modified by:   rlane
-@Last Modified time: 02-11-2017 16:22:15
+@Last Modified time: 02-11-2017 16:37:16
 """
 
 import os
@@ -108,13 +108,13 @@ class Mosaic(object):
     def get_transforms(self, transform=AffineTransform):
         """
         """
-        self.translations = np.array([[[0,       0],
-                                       [1122,    3],
-                                       [2237,    6]],
+        # self.translations = np.array([[[0,       0],
+        #                                [1122,    3],
+        #                                [2237,    6]],
 
-                                      [[0,    1041],
-                                       [1120, 1045],
-                                       [2248, 1049]]])
+        #                               [[0,    1041],
+        #                                [1120, 1045],
+        #                                [2248, 1049]]])
 
         if not hasattr(self, 'translations'):
             match_kws = {'overlap': 25}
@@ -517,7 +517,7 @@ def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
 
 if __name__ == '__main__':
 
-    fns = glob('sample_data/dartmouth_lungs/*[123]*[12]*.tiff')
+    fns = glob('sample_data/dartmouth_lungs/*[12]*[123]*.tiff')
     gmd = GenericMosaicData(filenames=fns)
     mosaic = Mosaic(gmd)
     mosaic.plot_mosaic(stitch_lines=True)
