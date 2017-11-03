@@ -2,12 +2,11 @@
 """
 @Author: rlane
 @Date:   01-11-2017 11:42:39
-@Last Modified by:   Ryan Lane
-@Last Modified time: 2017-11-02 23:21:35
+@Last Modified by:   rlane
+@Last Modified time: 03-11-2017 11:38:47
 """
 
 import os
-from glob import glob
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py
@@ -24,13 +23,17 @@ from .mosaic_data import GenericMosaicData
 
 class Mosaic(object):
     """docstring for Mosaic"""
-    def __init__(self, mosaic_data):
+    def __init__(self, mosaic_data, type):
         super(Mosaic, self).__init__()
 
         self.keys = mosaic_data.keys
         self.shape = mosaic_data.shape
         self.sorted_keys = mosaic_data.sorted_keys
-        self.imgs = mosaic_data.imgs
+
+        if type == 'EM':
+            self.imgs = mosaic_data.EM_imgs
+        else:
+            self.imgs = mosaic_data.FM_imgs
 
         self.Nx, self.Ny = self.shape
         self.nx, self.ny = self.imgs[self.keys[0]].shape[::-1]
@@ -108,7 +111,6 @@ class Mosaic(object):
     def get_transforms(self, transform=AffineTransform):
         """
         """
-
         if not hasattr(self, 'translations'):
             match_kws = {'overlap': 25}
             self.translations = self.get_translations(match_kws=match_kws)
@@ -131,8 +133,8 @@ class Mosaic(object):
                     self.translations[:,:,1].min()) + self.ny
         self.mshape = (self.mny, self.mnx)
 
-        self.warpeds = {}
-        self.masks = {}
+        warpeds = {}
+        masks = {}
 
         for i, k in enumerate(self.sorted_keys.flatten()):
             img = self.imgs[k]
@@ -144,56 +146,54 @@ class Mosaic(object):
             mask = (warped != -1)
             warped[~mask] = 0
 
-            self.warpeds[k] = warped
-            self.masks[k] = mask
+            warpeds[k] = warped
+            masks[k] = mask
 
-        return self.warpeds, self.masks
+        return warpeds, masks
 
     def get_costs(self):
         """
         """
-        if not hasattr(self, 'warpeds') or not hasattr(self, 'masks'):
-            self.warpeds, masks = self.get_warped_images()
+        warpeds, masks = self.get_warped_images()
 
-        self.h_costs = []
+        h_costs = []
         for col in self.sorted_keys.T:
             for i, (k1, k2) in enumerate(zip(col, col[1:])):
 
                 costs = generate_costs(
-                    np.abs(self.warpeds[k2] - self.warpeds[k1]),
-                           self.masks[k1] & self.masks[k2])
-                self.h_costs.append(costs)
+                    np.abs(warpeds[k2] - warpeds[k1]),
+                           masks[k1] & masks[k2])
+                h_costs.append(costs)
 
-        self.v_costs = []
+        v_costs = []
         for row in self.sorted_keys:
             for i, (k1, k2) in enumerate(zip(row, row[1:])):
 
                 costs = generate_costs(
-                    np.abs(self.warpeds[k2] - self.warpeds[k1]),
-                           self.masks[k1] & self.masks[k2])
-                self.v_costs.append(costs)
+                    np.abs(warpeds[k2] - warpeds[k1]),
+                           masks[k1] & masks[k2])
+                v_costs.append(costs)
 
-        self.h_costs = np.array(self.h_costs).reshape(
+        h_costs = np.array(h_costs).reshape(
             self.Nx, self.Ny-1, self.mny, self.mnx)
-        self.h_costs = self.h_costs.swapaxes(0, 1)
+        h_costs = h_costs.swapaxes(0, 1)
 
-        self.v_costs = np.array(self.v_costs).reshape(
+        v_costs = np.array(v_costs).reshape(
             self.Ny, self.Nx-1, self.mny, self.mnx)
-        self.v_costs = self.v_costs.swapaxes(0, 1)
+        v_costs = v_costs.swapaxes(0, 1)
 
-        return self.h_costs, self.v_costs
+        return h_costs, v_costs
 
     def get_minimum_cost_paths(self):
         """
         """
-        if not hasattr(self, 'h_costs') or not hasattr(self, 'v_costs'):
-            self.h_costs, self.v_costs = self.get_costs()
+        h_costs, v_costs = self.get_costs()
 
         self.h_mcps = []
         h_mcp_masks = []
 
         for i in range(self.Ny - 1):
-            costs = condsum(*self.h_costs[i,:,:,:])
+            costs = condsum(*h_costs[i,:,:,:])
             costs[:, 0] = 0
             costs[:, -1] = 0
 
@@ -214,7 +214,7 @@ class Mosaic(object):
         v_mcp_masks = []
 
         for i in range(self.Nx - 1):
-            costs = condsum(*self.v_costs[i,:,:,:])
+            costs = condsum(*v_costs[i,:,:,:])
             costs[0, :] = 0
             costs[-1, :] = 0
 
@@ -236,27 +236,27 @@ class Mosaic(object):
 
         cum_mask = (self.Nx * h_mcp_masks.sum(axis=0) +
                               v_mcp_masks.sum(axis=0))
-        self.mcp_masks = {}
+        mcp_masks = {}
         for i, krow in enumerate(self.sorted_keys):
             for j, k in enumerate(krow):
                 mask_val = (self.Nx*self.Ny - 1) - (self.Nx*i + j)
-                self.mcp_masks[k] = np.where(cum_mask == mask_val, 1, 0)
+                mcp_masks[k] = np.where(cum_mask == mask_val, 1, 0)
 
-        return self.mcp_masks
+        return mcp_masks
 
     def tile_images(self):
         """
         """
-        if not hasattr(self, 'mcp_masks'):
-            self.mcp_masks = self.get_minimum_cost_paths()
+        warpeds, _ = self.get_warped_images()
+        mcp_masks = self.get_minimum_cost_paths()
 
-        self.patches = {}
+        patches = {}
         for krow in self.sorted_keys:
             for k in krow:
-                self.patches[k] = np.where(
-                    self.mcp_masks[k], self.warpeds[k], 0)
+                patches[k] = np.where(
+                    mcp_masks[k], warpeds[k], 0)
 
-        self.stitched = np.sum(list(self.patches.values()), axis=0)
+        self.stitched = np.sum(list(patches.values()), axis=0)
         return self.stitched
 
     def plot_mosaic(self, stitch_lines=False):
@@ -274,11 +274,18 @@ class Mosaic(object):
 
             for mcp in self.v_mcps:
                 ax.plot(mcp[:, 1], mcp[:, 0], '#EEEEEE')
+        plt.show()
 
     def preview(self):
         """
         """
-        pass
+        fig, axes = plt.subplots(*self.shape[::-1])
+
+        for k_row, ax_row in zip(self.sorted_keys, axes):
+            for k, ax in zip(k_row, ax_row):
+                ax.imshow(self.imgs[k])
+                ax.axis('off')
+        plt.show()
 
     def crude_stitch(self):
         """
@@ -534,11 +541,12 @@ def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
 
 
 if __name__ == '__main__':
+    from glob import glob
 
     fns = glob('sample_data/dartmouth_lungs/*[1234]*[1]*.tiff')
     gmd = GenericMosaicData(filenames=fns)
     mosaic = Mosaic(gmd)
-    mosaic.plot_mosaic(stitch_lines=True)
-    print(mosaic.translations)
+    # mosaic.plot_mosaic(stitch_lines=True)
+    # print(mosaic.translations)
 
-    plt.show()
+    # plt.show()
