@@ -3,7 +3,7 @@
 @Author: rlane
 @Date:   01-11-2017 11:42:39
 @Last Modified by:   rlane
-@Last Modified time: 03-11-2017 11:38:47
+@Last Modified time: 16-11-2017 15:11:51
 """
 
 import os
@@ -12,30 +12,37 @@ import matplotlib.pyplot as plt
 import h5py
 from tqdm import tqdm
 
-from skimage.feature import ORB, match_descriptors
-from skimage.feature import register_translation
-from skimage.transform import SimilarityTransform, AffineTransform, warp
+from skimage.transform import AffineTransform, warp
 from skimage.graph import route_through_array
-from skimage.measure import label, ransac
+from skimage.measure import label
 
-from .mosaic_data import GenericMosaicData
+from .algorithms import (condsum, detect_features, find_matches,
+                         estimate_transform, estimate_translation,
+                         generate_costs)
+from .mosaic_data import OdemisMosaicData
 
 
 class Mosaic(object):
     """docstring for Mosaic"""
-    def __init__(self, mosaic_data, type):
+    def __init__(self, mosaic_data, tag=None):
         super(Mosaic, self).__init__()
 
         self.keys = mosaic_data.keys
         self.shape = mosaic_data.shape
         self.sorted_keys = mosaic_data.sorted_keys
 
-        if type == 'EM':
-            self.imgs = mosaic_data.EM_imgs
+        if isinstance(mosaic_data, OdemisMosaicData):
+            try:
+                self.imgs = mosaic_data.imgs[tag]
+            except KeyError as exc:
+                msg = ("`tag` must be given when loading from "
+                       "OdemisMosaicData`.")
+                raise KeyError(msg) from exc
         else:
-            self.imgs = mosaic_data.FM_imgs
+            self.imgs = mosaic_data.imgs
 
         self.Nx, self.Ny = self.shape
+        print(list(self.imgs.keys()))
         self.nx, self.ny = self.imgs[self.keys[0]].shape[::-1]
 
         # self.match_kws =
@@ -43,7 +50,7 @@ class Mosaic(object):
         # self.ransac_kws =
         # self.FFT_kws =
 
-    def get_translations(self, method='robust', match_kws=None,
+    def get_translations(self, method='FFT', match_kws=None,
                          ORB_kws=None, ransac_kws=None, FFT_kws=None):
         """
         """
@@ -64,9 +71,14 @@ class Mosaic(object):
                                                ORB_kws=ORB_kws,
                                                ransac_kws=ransac_kws)
                     shift = model.translation
+                    print(shift)
                 else:
-                    shift = estimate_translation(img1, img2,
-                                                 FFT_kws=FFT_kws)
+                    raw_shift = estimate_translation(img1, img2,
+                                                     match_kws=match_kws,
+                                                     FFT_kws=FFT_kws)
+                    # print(raw_shift)
+                    shift = np.array([self.nx - raw_shift[0], -raw_shift[1]])
+                    print(shift)
 
                 h_shifts.append(shift)
 
@@ -87,9 +99,14 @@ class Mosaic(object):
                                                ORB_kws=ORB_kws,
                                                ransac_kws=ransac_kws)
                     shift = model.translation
+                    print(shift)
                 else:
-                    shift = estimate_translation(img1, img2,
-                                                 FFT_kws=FFT_kws)
+                    raw_shift = estimate_translation(img1, img2,
+                                                     match_kws=match_kws,
+                                                     FFT_kws=FFT_kws)
+                    # print(raw_shift)
+                    shift = np.array([-raw_shift[0], self.ny - raw_shift[1]])
+                    print(shift)
 
                 v_shifts.append(shift)
 
@@ -112,8 +129,7 @@ class Mosaic(object):
         """
         """
         if not hasattr(self, 'translations'):
-            match_kws = {'overlap': 25}
-            self.translations = self.get_translations(match_kws=match_kws)
+            self.translations = self.get_translations()
 
         self.transforms = {}
         for krow, trow in zip(self.sorted_keys, self.translations):
@@ -259,6 +275,33 @@ class Mosaic(object):
         self.stitched = np.sum(list(patches.values()), axis=0)
         return self.stitched
 
+    def crude_tile(self):
+        """
+        """
+        warpeds, masks = self.get_warped_images()
+
+
+        warpeds_stitched = np.sum(list(warpeds.values()), axis=0)
+        masks_stitched = np.sum(list(masks.values()), axis=0)
+
+        stitched_norm = np.true_divide(warpeds_stitched, masks_stitched,
+                                       out=np.zeros_like(warpeds_stitched),
+                                       where=(masks_stitched != 0))
+        self.crude_stitch = stitched_norm
+
+        borders = []
+        for k, mask in masks.items():
+            x, y = np.where(mask == 1)
+            x1, y1, x2, y2 = (x.min(), y.min(), x.max(), y.max())
+            ledge = np.vstack((np.ones(y2 - y1) * x1, np.arange(y1, y2))).T
+            redge = np.vstack((np.ones(y2 - y1) * x2, np.arange(y1, y2))).T
+            uedge = np.vstack((np.arange(x1, x2), np.ones(x2 - x1) * y1)).T
+            bedge = np.vstack((np.arange(x1, x2), np.ones(x2 - x1) * y2)).T
+            borders += ledge, redge, uedge, bedge
+        self.crude_borders = borders
+
+        return self.crude_stitch
+
     def plot_mosaic(self, stitch_lines=False):
         """
         """
@@ -271,7 +314,6 @@ class Mosaic(object):
         if stitch_lines:
             for mcp in self.h_mcps:
                 ax.plot(mcp[:, 1], mcp[:, 0], '#EEEEEE')
-
             for mcp in self.v_mcps:
                 ax.plot(mcp[:, 1], mcp[:, 0], '#EEEEEE')
         plt.show()
@@ -287,266 +329,25 @@ class Mosaic(object):
                 ax.axis('off')
         plt.show()
 
-    def crude_stitch(self):
+    def plot_crude_stitch(self, stitch_lines=False):
         """
         """
-        pass
-
-
-def condsum(*arrs, r=1):
-    """
-    """
-    if len(arrs) == 1:
-        return arrs[0]
-    else:
-        a = condsum(*arrs[1:], r=r)
-        return np.where(a==r, arrs[0], a)
-
-
-def detect_features(img, ORB_kws=None):
-    """
-    Detect features using ORB.
-
-    Parameters
-    ----------
-
-    Returns
-    -------
-
-    Notes
-    -----
-    Wrapper for `skimage.feature.ORB`
-    http://scikit-image.org/docs/dev/api/skimage.feature.html#skimage.feature.ORB
-    """
-    ORB_kws = {} if ORB_kws is None else ORB_kws
-    default_ORB_kws = {
-        'downscale': 2,
-        'n_keypoints': 2000,
-        'fast_threshold': 0.05}
-
-    ORB_kws = {**default_ORB_kws, **ORB_kws}
-
-    orb = ORB(**ORB_kws)
-
-    orb.detect_and_extract(img.astype(float))
-    kps = orb.keypoints
-    dps = orb.descriptors
-
-    return kps, dps
-
-
-def find_matches(img1, img2, match_kws=None, ORB_kws=None):
-    """
-    Find matches between images.
-
-    Parameters
-    ----------
-
-    Returns
-    -------
-
-    Notes
-    -----
-    Wrapper for `skimage.feature.match_descriptors`
-    http://scikit-image.org/docs/dev/api/skimage.feature.html#match-descriptors
-    """
-    if match_kws is None:
-        kps_img1, dps_img1 = detect_features(img1, ORB_kws=ORB_kws)
-        kps_img2, dps_img2 = detect_features(img2, ORB_kws=ORB_kws)
-
-    else:
-        try:
-            m, n = img1.shape
-            o1 = 1 / (1 - (match_kws['overlap'] / 100))
-            o2 = 1 / (match_kws['overlap'] / 100)
-
-            if match_kws['direction'] == 'horizontal':
-                img1 = img1[:, int(n/o1):]
-                img2 = img2[:, :int(n/o2)]
-
-                kps_img1, dps_img1 = detect_features(img1, ORB_kws=ORB_kws)
-                kps_img2, dps_img2 = detect_features(img2, ORB_kws=ORB_kws)
-
-                kps_img1[:, 1] += int(n / o1)
-
-            else:  # assume images are stacked vertically
-                img1 = img1[int(m/o1):, :]
-                img2 = img2[:int(m/o2), :]
-
-                kps_img1, dps_img1 = detect_features(img1, ORB_kws=ORB_kws)
-                kps_img2, dps_img2 = detect_features(img2, ORB_kws=ORB_kws)
-
-                kps_img1[:, 0] += int(m / o1)
-
-        except KeyError as exc:
-            msg = "`match_kws` must contain {}.".format(exc)
-            raise KeyError(msg)
-
-    matches = match_descriptors(dps_img1, dps_img2, cross_check=True)
-    return kps_img1, kps_img2, matches
-
-
-def estimate_transform(img1, img2, match_kws=None,
-                       ORB_kws=None, ransac_kws=None):
-    """
-    Estimate Affine transformation between two images.
-
-    Parameters
-    ----------
-
-    Returns
-    -------
-
-    Notes
-    -----
-    Wrapper for `skimage.measure.ransac` assuming AffineTransform
-    http://scikit-image.org/docs/dev/api/skimage.measure.html#skimage.measure.ransac
-    """
-    kps_img1, kps_img2, matches = find_matches(
-        img1, img2, match_kws=match_kws, ORB_kws=ORB_kws)
-
-    src = kps_img2[matches[:, 1]][:, ::-1]
-    dst = kps_img1[matches[:, 0]][:, ::-1]
-
-    ransac_kws = {} if ransac_kws is None else ransac_kws
-    default_ransac_kws = {
-        'min_samples': 5,
-        'residual_threshold': 10,
-        'max_trials': 5000}
-
-    ransac_kws = {**default_ransac_kws, **ransac_kws}
-
-    model, inliers = ransac((src, dst), AffineTransform, **ransac_kws)
-    return model
-
-
-def estimate_translation(img1, img2, match_kws=None, FFT_kws=None):
-    """
-    Estimate lateral translation between two images.
-
-    Parameters
-    ----------
-
-    Returns
-    -------
-
-    Notes
-    -----
-    Wrapper for `skimage.feature.register_translation`
-    http://scikit-image.org/docs/dev/api/skimage.feature.html#skimage.feature.register_translation
-    """
-
-    FFT_kws = {} if FFT_kws is None else FFT_kws
-    default_FFT_kws = {
-        'upsample_factor': 1,
-        'space': 'real'}
-
-    FFT_kws = {**default_FFT_kws, **FFT_kws}
-
-    if match_kws is None:
-        shifts, error, phase_difference = register_translation(
-            img1, img2, **FFT_kws)
-
-    else:
-        try:
-            m, n = img1.shape
-            o1 = 1 / (1 - (match_kws['overlap'] / 100))
-            o2 = 1 / (match_kws['overlap'] / 100)
-
-            if match_kws['direction'] == 'horizontal':
-                img1 = img1[:, int(n/o1):]
-                img2 = img2[:, :int(n/o2)]
-
-                shifts, error, phase_difference = register_translation(
-                    img1, img2, **FFT_kws)
-
-            else:  # assume images are stacked vertically
-                img1 = img1[int(m/o1):, :]
-                img2 = img2[:int(m/o2), :]
-
-                shifts, error, phase_difference = register_translation(
-                    img1, img2, **FFT_kws)
-
-        except KeyError as exc:
-            msg = "`match_kws` must contain {}.".format(exc)
-            raise KeyError(msg)
-
-    return shifts
-
-
-def generate_costs(diff_image, mask, vertical=True, gradient_cutoff=2.):
-    """
-    Ensures equal-cost paths from edges to region of interest.
-
-    Parameters
-    ----------
-    diff_image : (M, N) ndarray of floats
-        Difference of two overlapping images.
-    mask : (M, N) ndarray of bools
-        Mask representing the region of interest in ``diff_image``.
-    vertical : bool
-        Control operation orientation.
-    gradient_cutoff : float
-        Controls how far out of parallel lines can be to edges before
-        correction is terminated. The default (2.) is good for most cases.
-
-    Returns
-    -------
-    costs_arr : (M, N) ndarray of floats
-        Adjusted costs array, ready for use.
-    """
-    if vertical is not True:
-        return tweak_costs(diff_image.T, mask.T, vertical=vertical,
-                           gradient_cutoff=gradient_cutoff).T
-
-    # Start with a high-cost array of 1's
-    costs_arr = np.ones_like(diff_image)
-
-    # Obtain extent of overlap
-    row, col = mask.nonzero()
-    cmin = col.min()
-    cmax = col.max()
-
-    # Label discrete regions
-    cslice = slice(cmin, cmax + 1)
-    labels = label(mask[:, cslice])
-
-    # Find distance from edge to region
-    upper = (labels == 0).sum(axis=0)
-    lower = (labels == 2).sum(axis=0)
-
-    # Reject areas of high change
-    ugood = np.abs(np.gradient(upper)) < gradient_cutoff
-    lgood = np.abs(np.gradient(lower)) < gradient_cutoff
-
-    # Give areas slightly farther from edge a cost break
-    costs_upper = np.ones_like(upper, dtype=np.float64)
-    costs_lower = np.ones_like(lower, dtype=np.float64)
-    costs_upper[ugood] = upper.min() / np.maximum(upper[ugood], 1)
-    costs_lower[lgood] = lower.min() / np.maximum(lower[lgood], 1)
-
-    # Expand from 1d back to 2d
-    vdist = mask.shape[0]
-    costs_upper = costs_upper[np.newaxis, :].repeat(vdist, axis=0)
-    costs_lower = costs_lower[np.newaxis, :].repeat(vdist, axis=0)
-
-    # Place these in output array
-    costs_arr[:, cslice] = costs_upper * (labels == 0)
-    costs_arr[:, cslice] += costs_lower * (labels == 2)
-
-    # Finally, place the difference image
-    costs_arr[mask] = diff_image[mask]
-
-    return costs_arr
-
-
-if __name__ == '__main__':
-    from glob import glob
-
-    fns = glob('sample_data/dartmouth_lungs/*[1234]*[1]*.tiff')
-    gmd = GenericMosaicData(filenames=fns)
-    mosaic = Mosaic(gmd)
-    # mosaic.plot_mosaic(stitch_lines=True)
-    # print(mosaic.translations)
-
-    # plt.show()
+        fig, ax = plt.subplots()
+        ax.imshow(self.crude_stitch)
+
+        if stitch_lines:
+            for border in self.crude_borders:
+                ax.plot(border[:, 1], border[:, 0], lw=1, color='#FFFFFF')
+        plt.show()
+
+    def plot_translations(self):
+        """
+        """
+        X = self.translations[:,:,0].flatten()
+        Y = self.translations[:,:,1].flatten()
+
+        fig, ax = plt.subplots()
+        ax.plot(X, Y, 'x-', ms=15, mew=3)
+        ax.invert_yaxis()
+        ax.set_aspect('equal')
+        plt.show()
