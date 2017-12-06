@@ -102,3 +102,6 @@ ENV/
 
 # Windows Thumbs junk
 Thumbs.db
+
+# Saved ipython notebooks
+.html
