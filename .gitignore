@@ -104,4 +104,4 @@ ENV/
 Thumbs.db
 
 # Saved ipython notebooks
-.html
+*.html
