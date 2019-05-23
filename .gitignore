@@ -102,3 +102,6 @@ ENV/
 
 # Windows Thumbs junk
 Thumbs.db
+
+# Mac DS_Store junk
+.DS_Store
